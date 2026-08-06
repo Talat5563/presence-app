@@ -40,10 +40,27 @@ listening.
 | Codebase | Kotlin Multiplatform shared core, native UI per platform |
 | Platform order | Android first, iOS second |
 
-**Listening rule, stated precisely:** the microphone is active only when the screen is on and
-unlocked. If the parent enables family-time windows, the mic is active only when the screen is on
-*and* the current time falls inside a window. The mic is never active while the screen is off.
-This rule is a hard invariant, not a setting — the "always listening" option is deliberately absent.
+### Listening rule, stated precisely
+
+**On Android**, the microphone is active only when the screen is on and unlocked. If the parent
+enables family-time windows, the mic is active only when the screen is on *and* the current time
+falls inside a window. The mic is never active while the screen is off. This is a hard invariant,
+not a setting — an "always listening" option is deliberately absent.
+
+**On iOS the invariant cannot be enforced in Tier 1**, because a backgrounded iOS app has no way to
+read screen-on state (§6). The consequence is a deliberate divergence rather than a silent one:
+
+| | Screen-on gating | Family-time windows |
+|---|---|---|
+| Android | Enforced | Optional |
+| iOS Tier 1 (no entitlement) | **Not possible** | **Mandatory** — the only bound on listening |
+| iOS Tier 2 (Family Controls) | Enforced via `DeviceActivityMonitor` | Optional |
+
+So on iOS Tier 1 the mic may be active while the screen is off, within a window the parent
+explicitly configured. Configuring at least one window is therefore a requirement to enable the app
+on iOS Tier 1, and onboarding must state the difference plainly instead of implying Android's
+guarantee. This is the strongest argument for pursuing the Tier 2 entitlement: it is what makes the
+privacy story identical across platforms.
 
 ---
 

@@ -93,7 +93,10 @@ like a notification from a compliance system.
 15. **Sensitivity** — a slider trading false alarms against missed moments. This is a first-class
     control, not buried in an advanced section. Explain the trade-off in plain words.
 16. **Family time schedule** — optional day and time windows that further narrow when the app
-    listens. Show clearly that the mic *never* runs while the screen is off, regardless of schedule.
+    listens. Show clearly that on Android the mic *never* runs while the screen is off, regardless
+    of schedule. (On iOS this guarantee does not hold in the entitlement-free tier, where a schedule
+    is the only bound on listening — so design this screen's explanatory copy as
+    platform-conditional rather than a single universal claim.)
 17. **Manage children** — list, edit, re-enroll, disable, delete. Include a gentle prompt to
     re-enroll periodically, because a child's voice changes as they grow.
 18. **History** — a simple, non-judgmental log of moments. Deliberately not a dashboard, not a
