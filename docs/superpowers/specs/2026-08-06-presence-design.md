@@ -37,6 +37,10 @@ listening.
 | Data handling | 100% on-device. No account, no server, no upload |
 | Enrollment | Two modes — guided live recording, or import existing recordings |
 | Accuracy correction | One-tap "not them" on the intervention screen |
+| Household enrollment | Parent and siblings enrolled as non-target profiles — required, see §5 |
+| Decision rule | Relative likelihood across the household, accumulated over segments — not an absolute per-utterance threshold |
+| Metrics of record | False alarms per hour, and miss rate per real event. Not EER |
+| Model strategy | Fine-tune on children's speech offline; ship the improved model in the app |
 | Codebase | Kotlin Multiplatform shared core, native UI per platform |
 | Platform order | Android first, iOS second |
 
@@ -128,10 +132,20 @@ mic (16 kHz mono, ring buffer)
   ├─> VadGate — is anyone speaking at all?        [Silero VAD class, ~1 MB, runs continuously]
   │     └─> (silence: stop here — ~95% of frames)
   │
-  ├─> EmbeddingMatcher — embed the speech segment [ECAPA-TDNN class, ~20 MB, speech only]
-  │     └─> cosine similarity vs each enabled VoiceProfile
+  ├─> Channel A: wake-phrase fast path            [optional, high precision]
+  │     personalized keyword ("Mummy", "Abba", a name)
+  │       └─> text-dependent speaker check on that phrase
+  │             └─> high-confidence LLR contribution, fires fast
   │
-  ├─> Debouncer — N hits within a window, then cooldown
+  ├─> Channel B: text-independent speaker ID      [always on, lower per-segment confidence]
+  │     embed the speech segment                  [~20 MB, speech only]
+  │       └─> score vs EVERY enrolled household member (target, siblings, parent)
+  │             └─> normalize against the household cohort
+  │                   └─> relative log-likelihood ratio, not an absolute threshold
+  │
+  ├─> EvidenceAccumulator — sum LLR across segments in a rolling window
+  │     fires when accumulated evidence crosses the operating point
+  │     then enters cooldown
   │
   └─> DetectionEvent → InterventionRenderer
 ```
@@ -156,25 +170,151 @@ parent's own home videos).
 
 - **The VAD gate is what makes battery cost survivable.** The expensive embedding model wakes only
   for actual speech — roughly a 5% duty cycle in a normal room.
-- **The debouncer is what makes the app tolerable to live with.** A single-frame trigger would fire
-  constantly. Detection requires N consecutive positive segments inside a rolling window, followed
-  by a cooldown period during which no further intervention fires.
+- **The evidence accumulator is what makes the app *accurate*, not merely tolerable.** See §4.1: it
+  is the primary accuracy mechanism in this design, not a debouncing convenience.
 
-### Known accuracy risk
+---
 
-Speaker-embedding models are trained predominantly on adult speech. Children's voices — higher
-pitch, less stable formants, rapidly changing with age — are materially harder. This is the
-project's biggest technical unknown. Mitigations, in order:
+## 4.1 Accuracy strategy
 
-1. Validate against real recordings of children **before** building any UI (see §9, Phase 0).
-2. Ship the sensitivity slider as a first-class control, not a hidden advanced setting.
-3. The "not them" button stores the rejected embedding as a negative example; the matcher requires
-   a candidate to be closer to the positive centroid than to any negative example.
-4. Prompt for re-enrollment periodically, since a child's voice drifts over months.
+This section exists because the published numbers for children's speaker verification are bad
+enough to kill a naive implementation, and because the reasons they are bad do not fully apply to
+this product. Both halves matter.
 
-If Phase 0 shows accuracy is unacceptable, the fallback is generic child-voice detection with a
-manual confirm step — a materially different product, and a decision point worth reaching early
-and cheaply.
+### The honest baseline
+
+An adult-trained ECAPA-TDNN applied to children with no adaptation ("zero-resource") measures:
+
+| Condition | EER |
+|---|---|
+| CSLU Kids, scripted speech | 14.5% (boys) / 16.7% (girls) |
+| MyST, spontaneous conversational speech | ~31% |
+
+Spontaneous conversational speech is our condition. **~31% EER is unusable as a per-utterance
+decision.** The ChildAugment authors additionally discarded single-word utterances — averaging 0.92
+seconds — as too short to evaluate meaningfully. "Daddy!" is a single word.
+
+Causes are anatomical and well established: children have higher fundamental and formant
+frequencies from shorter vocal tracts, and the tract changes shape rapidly during growth, producing
+much wider intra- and inter-speaker variation than adult speech.
+
+### Why our problem is easier than the benchmark
+
+Benchmark speaker verification is deliberately hard in ways this product is not: one short
+utterance, an unknown open-set impostor population, an absolute threshold, a single shot. Presence
+has four structural advantages, and the design must exploit all four.
+
+**1. It is a closed household roster, not open-set verification.**
+Enroll the parent and the siblings alongside the target child. The runtime question becomes *"which
+household member does this most resemble"* — a relative comparison rather than an absolute
+threshold. Sibling-vs-target is the hardest confusion in real households, and relative scoring
+attacks it directly. Enrolled family members double as the impostor cohort that adaptive score
+normalization needs and normally has to approximate from a generic set.
+
+**2. Evidence accumulates across segments.**
+No decision needs to rest on one 0.9-second word. A child seeking attention talks for tens of
+seconds. Per-segment scores become log-likelihood-ratio contributions summed over a rolling window;
+the decision fires when accumulated evidence crosses the operating point. The literature is
+consistent that error falls as effective duration rises, and that segmenting long audio and
+averaging embeddings is the standard way to exploit it. **Consequence: the accumulator is the
+primary accuracy mechanism, not a UX nicety.** An earlier draft of this spec treated it as a
+debouncer that counted hits; that was a design error.
+
+**3. Error costs are asymmetric, so EER is the wrong metric.**
+A false accept shows a photo the parent dismisses with one tap. A false reject misses a moment.
+Neither is a security breach. The system should operate far from the equal-error point, trading
+false alarms for recall. **The metrics of record are false alarms per hour of listening and miss
+rate per real attention-seeking event.** EER appears in this spec only to compare against published
+work; it is not a product target.
+
+**4. Text-dependent verification is far more accurate on short utterances**, because the phonetic
+content is known — the literature reports text-dependent systems outperforming text-independent
+ones and tolerating much shorter enrollment. The most common real event is the child calling the
+parent by name, which makes a high-precision second channel available cheaply.
+
+### The accuracy ladder
+
+| | Technique | Cost | Payoff | In v1? |
+|---|---|---|---|---|
+| **L0** | Pre-trained embedding, absolute threshold | none | 14–31% EER — unusable alone | baseline only |
+| **L1** | Household cohort, relative scoring, score normalization | plain code | Large; attacks sibling confusion | **Yes** |
+| **L2** | LLR accumulation across segments | plain code | Large; turns weak signal into confident decisions | **Yes** |
+| **L3** | Fine-tune on children's speech; ChildAugment on adult data | days–weeks, one-time, offline | ~10× — the big lever | **Yes** (offline) |
+| **L4** | Per-household adaptation: negative examples, drift re-enrollment | small | Moderate; essential over months | **Yes** |
+| **L5** | Text-dependent wake-phrase channel | moderate | High precision on the most common event | Stretch |
+
+L1 and L2 cost nothing but design thought. L3 is a one-time offline model-training cost that never
+touches runtime complexity — it ships as a better model file.
+
+### L3 in detail: fine-tuning
+
+Fine-tuning the same ECAPA-TDNN architecture on children's speech reaches **2.9% EER** on Samrómur
+Children — roughly a tenfold improvement over the zero-resource baseline, and the reason this
+product is viable at all.
+
+**Data.** [Samrómur Children](https://huggingface.co/datasets/language-and-voice-lab/samromur_children)
+is **CC BY 4.0** on Hugging Face: 131 hours, 137,597 utterances, 3,175 speakers aged 4–17.
+Commercial use is permitted with attribution. Two caveats to validate rather than assume:
+
+- It is **Icelandic**, and our deployment language differs. Speaker embeddings transfer across
+  languages substantially better than ASR does, but this must be measured, not asserted.
+- It is **read** speech, while our runtime condition is **spontaneous**. This is the same mismatch
+  that separates the 14% and 31% figures above, so it is the more serious of the two caveats.
+
+**Supplementary augmentation (ChildAugment).** Adult training data can be warped to emulate
+children's vocal tracts, yielding roughly 12% relative EER improvement on its own — useful as a
+supplement, not a substitute for real child data. Published parameter ranges:
+
+| Method | Parameters |
+|---|---|
+| Speed / pitch modification | α ∈ [0.9, 1.1] |
+| VTLP | α ∈ [0.9, 1.1] |
+| LPC-WP | α ∈ [0.7, 1.3] |
+| LPC-SWP (formant-specific warping) | α₁ ∈ [0.6, 0.85], hierarchically constrained thereafter |
+| BWP-FEP (bandwidth / energy perturbation) | β₁₋₄ ∈ [0.9, 1.1] |
+| Application-agnostic | SpecAugment, additive noise, RIR |
+
+**Toolchain.** WeSpeaker trains in PyTorch and exports to ONNX by design, which is exactly this
+pipeline. [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/speaker-identification/) already ships
+WeSpeaker, 3D-Speaker, and NeMo embedding models as ONNX with a Kotlin API and working Android
+speaker-identification demo APKs — so the fine-tune → export → on-device path is a well-trodden
+one rather than novel integration work.
+
+### L4 in detail: age drift
+
+A child's voice changes as they grow, and this degrades a stored profile measurably. ICASSP 2025
+work combining a Feature Transform Adapter with synthetic audio augmentation reduced EER by 19.4%
+at a one-year age gap, 13.0% at two years, and **6.1% at three years**.
+
+The declining returns are the finding that matters: **no technique solves drift.** Therefore:
+
+- Re-enrollment is a first-class product feature, prompted on a schedule (younger children more
+  often), not an obscure settings action.
+- Profiles record their enrollment date; the UI surfaces staleness before accuracy visibly rots.
+- The "not them" button stores rejected embeddings as negative examples, so a drifting profile
+  degrades toward *silence* rather than toward *firing on a sibling*.
+- Multiple enrollment sessions over time are retained and merged rather than overwritten, giving
+  the profile a wider view of the child's voice.
+
+### Build-versus-buy
+
+[Picovoice Eagle](https://picovoice.ai/platform/eagle/) is a commercial on-device speaker
+recognition engine covering Android and iOS, claiming meaningfully lower EER than SpeechBrain.
+Worth benchmarking in Phase 0 as a baseline and a fallback. It is rejected as the primary path for
+two reasons: it is proprietary with per-seat licensing, and **it cannot be fine-tuned on children's
+speech** — which forfeits L3, the single largest lever available. If Phase 0 shows our fine-tuned
+model losing to Eagle out of the box, that conclusion should be revisited honestly.
+
+### Go / no-go criteria for Phase 0
+
+Measured on the household-simulation set defined in §9, with L1 and L2 active:
+
+- **Ship:** ≤ 1 false alarm per 2 hours of active listening, at ≥ 80% detection of real
+  attention-seeking events within 10 seconds.
+- **Iterate:** false alarms between 1 per 2 hours and 2 per hour, or detection between 50% and 80%.
+- **Fall back:** worse than that after L3. The fallback is Channel A alone — a personalized
+  wake-phrase detector with a speaker check, which is a narrower but genuinely useful product, and
+  a far more honest one than a text-independent detector that cries wolf.
 
 ---
 
@@ -193,6 +333,33 @@ needed, but quality varies and some imports will be rejected.
 `ClipQualityCheck` gates both: minimum total speech duration, adequate signal-to-noise, no
 clipping, single dominant speaker. Rejected clips give a specific reason ("too much background
 noise", "we couldn't hear speech here") rather than a generic failure.
+
+**Duration is not a detail.** Published results show error falling as enrollment duration rises, and
+utterances under about a second being near-worthless. `ClipQualityCheck` therefore enforces a
+minimum *aggregate speech* duration rather than a minimum clip count, and the UI reports progress in
+seconds of usable speech collected, not clips recorded.
+
+### Household enrollment — required, not optional
+
+This is a direct consequence of §4.1. **Enrolling only the target child is a design error.** The
+parent and any siblings are enrolled too, as labelled non-target profiles, because:
+
+1. Relative scoring across the household is what makes sibling discrimination tractable.
+2. Enrolled family members form the impostor cohort for score normalization.
+3. The parent's own voice is the single most common non-target voice the microphone will hear, since
+   the phone is in their hand.
+
+Non-target enrollment is deliberately lighter than target enrollment — shorter sessions, and import
+is fine — because these profiles only need to be good enough to *subtract*. Onboarding must frame
+this honestly and in the parent's terms: *"Record yourself and their brother or sister too. It's how
+we learn to tell them apart."* A parent who understands the reason will do it; one who is asked to
+record three people for no stated reason will abandon setup.
+
+**Television and media audio** are the other major false-alarm source, and cannot be enrolled the
+same way — the voices are unbounded. Mitigations available without new machinery: media playback is
+usually detectable through platform audio state, and detections that coincide with active media
+output can be scored more conservatively. Worth measuring in Phase 0 before building anything
+special for it.
 
 ---
 
@@ -310,9 +477,36 @@ is visible in the UI. A parent trusting a silent, broken app is worse than no ap
 
 ## 9. Testing strategy
 
-**Phase 0 — accuracy spike, before any UI.** A JVM harness that runs the pipeline over a corpus of
-real child and adult recordings, reporting false-accept and false-reject rates across thresholds.
-This validates or kills the core premise for a few days' work. Nothing else should be built first.
+### Phase 0 — accuracy spike, before any UI
+
+Nothing else should be built first. Phase 0 evaluates **the system, not the model** — with household
+cohort scoring (L1) and evidence accumulation (L2) active — because measuring a bare pre-trained
+embedding against an absolute threshold would reproduce the ~31% EER from the literature and tell us
+nothing we do not already know.
+
+It reports the **product metrics from §4.1** — false alarms per hour of listening, and miss rate per
+real attention-seeking event within a 10-second latency budget — as a curve across operating points,
+not a single number. EER is computed only to compare against published work.
+
+**Evaluation sets, in increasing order of realism:**
+
+1. **Samrómur Children** (CC BY 4.0) — a large, clean, public baseline for child-vs-child
+   discrimination. Establishes whether the model works at all, and quantifies the fine-tuning gain.
+2. **Household simulation** — target child, sibling, parent, and television audio mixed at realistic
+   room levels and distances. This is the set the go/no-go criteria are measured on. It is what
+   Samrómur cannot tell us, because the benchmark contains no siblings and no TV.
+3. **Real household recordings** — small, consented, and never committed to a public repository
+   (§11). The only set that exposes spontaneous-speech and room-acoustic reality.
+
+**Phase 0 must also settle these, since each is load-bearing for the plan:**
+
+- Zero-resource baseline versus fine-tuned model, on the same sets — does L3 deliver its promised
+  order of magnitude here, or only on Icelandic read speech?
+- How far the Icelandic-to-target-language and read-to-spontaneous mismatches actually cost.
+- Picovoice Eagle benchmarked as an out-of-the-box baseline (§4.1, build-versus-buy).
+- The accumulation window length and cooldown that hit the latency budget — a longer window is more
+  accurate and slower, and this trade is the core tuning decision of the product.
+- Whether media-playback state is a usable signal for suppressing television false alarms.
 
 - **Engine unit tests (JVM, no device):** `DetectionEngine`, `VadGate`, `EmbeddingMatcher`,
   `Debouncer` against WAV fixtures. Deterministic, fast, the bulk of the suite.
@@ -330,11 +524,21 @@ This validates or kills the core premise for a few days' work. Nothing else shou
 ## 10. Open questions for planning
 
 1. Battery budget target: what percentage per hour of screen-on listening is acceptable?
-2. Specific model selection and license verification for the VAD and embedding models.
-3. Multi-child support in v1, or single child with the schema ready for more?
+2. Specific model selection and license verification for the VAD and embedding models. sherpa-onnx
+   redistributes WeSpeaker, 3D-Speaker, and NeMo models under their respective upstream licenses —
+   each candidate must be checked individually before it ships, not assumed permissive.
+3. Multi-child support in v1, or single child with the schema ready for more? Note that §5 requires
+   multi-*profile* support regardless, since siblings and the parent are enrolled as non-targets — so
+   the marginal cost of multi-child is now small.
 4. Minimum Android API level.
 5. Distribution intent: personal use, open source, or App/Play Store release? This determines
    whether the Family Controls entitlement request and store-review preparation are in scope.
+6. **Deployment language.** Speaker embeddings are largely language-independent, but the L5
+   wake-phrase channel is not, and the Samrómur mismatch (§4.1) is measured against a specific target
+   language. Needs deciding before Phase 0 assembles its evaluation sets.
+7. Does the project have access to consented recordings of real children for the Phase 0 household
+   simulation set? Without them Phase 0 can only measure the public benchmark, which §4.1 argues is
+   the less informative half.
 
 ---
 
@@ -359,6 +563,64 @@ These are product requirements, not aspirations, and each is testable:
 
 - iOS implementation (phase 2; the shared core is designed for it now)
 - Family Controls entitlement request (blocked on distribution intent)
+- L5 wake-phrase channel (§4.1) — a stretch goal for v1, and the designated fallback product if
+  text-independent accuracy proves inadequate
+- Feature Transform Adapter architecture changes for age robustness (§4.1, L4) — the simpler drift
+  mitigations come first
 - Any analytics or telemetry
 - Multi-device or multi-parent sync
 - Statistics and history beyond a simple event log
+
+---
+
+## 13. References
+
+Accuracy figures and techniques in §4.1 come from the following. Numbers quoted in this spec are as
+reported by the authors on their own evaluation sets, and are not directly comparable to each other.
+
+**Children's speaker verification — the problem**
+- [ChildAugment: Data augmentation methods for zero-resource children's speaker verification](https://arxiv.org/html/2402.15214)
+  (JASA 155(3), 2024) — zero-resource EERs on CSLU Kids and MyST; vocal-tract augmentation methods
+  and parameter ranges; the ~0.92s short-utterance exclusion.
+- [Children's speaker verification in low and zero resource conditions](https://www.sciencedirect.com/science/article/abs/pii/S1051200421001548)
+  (Digital Signal Processing, 2021).
+
+**Fine-tuning — the main lever**
+- [Deep Speaker Embeddings for Speaker Verification of Children](https://link.springer.com/chapter/10.1007/978-3-031-70566-3_6)
+  (TSD 2024) — x-vector / ECAPA-TDNN / ResNet-TDNN compared with and without fine-tuning;
+  ECAPA-TDNN at 2.9% EER fine-tuned, on Samrómur Children.
+
+**Age drift**
+- [Enhancing Age-Related Robustness in Children Speaker Verification](https://arxiv.org/abs/2502.10511)
+  (ICASSP 2025) — Feature Transform Adapter and synthetic audio augmentation; 19.4% / 13.0% / 6.1%
+  relative EER reduction at one-, two-, and three-year age gaps.
+- [An Age-Agnostic System for Robust Speaker Verification](https://arxiv.org/html/2508.01637).
+
+**Scoring and aggregation**
+- [Trainable Adaptive Score Normalization for Automatic Speaker Verification](https://arxiv.org/abs/2504.04512)
+  — AS-norm and its trainable extension; the basis for household-cohort normalization in §4.1.
+- [Incorporation of Speech Duration Information in Score Fusion of Speaker Recognition Systems](https://arxiv.org/pdf/1608.02272)
+  — duration-dependent scoring.
+
+**Text-dependent verification**
+- [Speaker Verification: Text-Dependent vs. Text-Independent](https://www.microsoft.com/en-us/research/project/speaker-verification-text-dependent-vs-text-independent/)
+  (Microsoft Research) — the short-utterance advantage underpinning L5.
+
+**Data**
+- [Samrómur Children](https://huggingface.co/datasets/language-and-voice-lab/samromur_children) —
+  CC BY 4.0, 131h, 137,597 utterances, 3,175 speakers aged 4–17.
+  [Corpus paper (LREC 2022)](https://aclanthology.org/2022.lrec-1.105/). **Attribution is a license
+  condition — it must appear in the app's about screen and in this repository.**
+- MyST (My Science Tutor) — 1,371 students, grades 3–5, ~470h conversational speech. Access terms to
+  be confirmed.
+- CSLU Kids — ~1,100 children, grades K–10. LDC-licensed, paid.
+- [CryCeleb](https://arxiv.org/pdf/2305.00969) — infant cry speaker verification; out of scope here,
+  relevant only if the product ever targets pre-verbal children.
+
+**Toolchain**
+- [sherpa-onnx speaker identification](https://k2-fsa.github.io/sherpa/onnx/speaker-identification/)
+  — ONNX embedding models with Kotlin API and Android demo APKs.
+- [WeSpeaker](https://arxiv.org/pdf/2210.17016) — PyTorch training with ONNX/JIT export; the intended
+  fine-tuning path.
+- [3D-Speaker](https://github.com/modelscope/3D-Speaker) — models and ONNX Runtime inference.
+- [Picovoice Eagle](https://picovoice.ai/platform/eagle/) — commercial on-device baseline (§4.1).

@@ -18,10 +18,15 @@ Everything happens on the device. No account, no server, no audio ever uploaded.
 
 **Design phase.** No implementation code yet — deliberately.
 
-The next milestone is a *Phase 0 accuracy spike*: a JVM harness that measures speaker-recognition
-accuracy on real recordings of children before any UI is built. Speaker-embedding models are trained
-mostly on adult speech, and children's voices are materially harder. That spike validates or kills
-the core premise for a few days' work, and nothing else should be built ahead of it.
+The next milestone is a *Phase 0 accuracy spike* (spec §9): a JVM harness that measures the detection
+system — not just the model — against public child-speech benchmarks and a household simulation set,
+before any UI is built.
+
+That ordering isn't caution for its own sake. Recognizing a specific child's voice is the whole
+product and it is genuinely hard: adult-trained speaker models measure around **31% EER on children's
+spontaneous speech**, which is unusable per-utterance. Fine-tuning on children's speech reaches
+**2.9% EER**, and the design adds household-cohort scoring and cross-segment evidence accumulation on
+top. Spec §4.1 lays out that accuracy ladder with sources, and §9 defines explicit go / no-go numbers.
 
 ## What's here
 
@@ -43,12 +48,15 @@ WAV fixtures, with no device and no emulator.
 mic (16 kHz mono)
   └─> VAD gate — is anyone speaking?          ~1 MB, always on
         └─> speaker embedding                 ~20 MB, speech only (~5% duty cycle)
-              └─> similarity vs enrolled profile
-                    └─> debounce + cooldown
+              └─> score vs every enrolled household member
+                    └─> accumulate log-likelihood across segments
                           └─> intervention
 ```
 
-The VAD gate keeps battery cost survivable. The debouncer keeps the app tolerable to live with.
+The VAD gate keeps battery cost survivable. **The accumulator is what makes it accurate** — no single
+0.9-second word has to carry the decision, and scoring against the whole household (siblings and the
+parent included) turns an absolute threshold into a relative comparison. Enrolling the other people in
+the house is therefore a requirement, not a nice-to-have.
 
 **Platform reality:** Android can dim and draw over other apps. iOS cannot — there, the same product
 is delivered through a Live Activity in the Dynamic Island, a Time-Sensitive notification, and
@@ -64,6 +72,18 @@ Product requirements, not aspirations — each one testable:
 - Event logs record timestamp, child, and confidence — never audio
 - Real family audio never enters version control (enforced by `.gitignore`)
 - Uninstalling deletes everything
+
+## Attribution
+
+If the shipped model is fine-tuned on **Samrómur Children** (spec §4.1), that corpus is licensed
+**CC BY 4.0** and attribution is a license condition — it must appear both here and in the app's about
+screen:
+
+> Samrómur Children, Language and Voice Lab, Reykjavík University — CC BY 4.0.
+> https://huggingface.co/datasets/language-and-voice-lab/samromur_children
+
+Third-party model licenses (WeSpeaker, 3D-Speaker, NeMo, Silero VAD) must each be verified
+individually before shipping — see spec §10, open question 2.
 
 ## License
 
