@@ -41,6 +41,8 @@ listening.
 | Decision rule | Relative likelihood across the household, accumulated over segments — not an absolute per-utterance threshold |
 | Metrics of record | False alarms per hour, and miss rate per real event. Not EER |
 | Model strategy | Fine-tune on children's speech offline; ship the improved model in the app |
+| Languages | English and Hebrew at first release. Bilingual enrollment is mandatory — see §4.2 |
+| Layout | Bidirectional (LTR + RTL) from the first screen, not retrofitted |
 | Codebase | Kotlin Multiplatform shared core, native UI per platform |
 | Platform order | Android first, iOS second |
 
@@ -305,9 +307,86 @@ two reasons: it is proprietary with per-seat licensing, and **it cannot be fine-
 speech** — which forfeits L3, the single largest lever available. If Phase 0 shows our fine-tuned
 model losing to Eagle out of the box, that conclusion should be revisited honestly.
 
-### Go / no-go criteria for Phase 0
+---
 
-Measured on the household-simulation set defined in §9, with L1 and L2 active:
+## 4.2 Bilingual operation — English and Hebrew
+
+First release targets **English and Hebrew**. This is not a localization detail; it changes the
+recognizer's design in three places.
+
+### Language mismatch is a first-order accuracy problem
+
+Cross-lingual speaker verification degrades **40–49%** when enrollment and test utterances are in
+different languages. Critically, a bilingual *same-speaker* evaluation found that language mismatch
+remains the main driver of that loss even with speaker identity held constant — it is domain shift
+from the language itself, not merely inter-speaker variability.
+
+The implication for a Hebrew/English household is direct and severe: **a child enrolled in Hebrew and
+then heard speaking English is close to a different-domain trial.** Left unaddressed this would
+plausibly cost more accuracy than everything L1 and L2 recover.
+
+**Therefore bilingual enrollment is mandatory, not optional:**
+
+- The guided enrollment session prompts in **both** languages, and does not complete until it has
+  collected sufficient usable speech in each.
+- `VoiceProfile` stores **per-language sub-centroids** rather than one pooled centroid, since pooling
+  across a domain shift this large blurs the profile rather than broadening it. Scoring takes the
+  best-matching sub-profile.
+- Imported recordings are language-tagged, and the import flow reports per-language coverage so the
+  parent can see which language is short.
+- Households that are genuinely monolingual can enroll in one language; the app then states plainly
+  that detection in the other language will be unreliable, rather than silently underperforming.
+- Code-switching mid-sentence is normal in bilingual homes and is the untested case. Phase 0 must
+  measure it explicitly (§9.1).
+
+### Training data: Hebrew has no children's corpus
+
+There is **no public Hebrew children's speech corpus**. This is the single hardest data gap in the
+project, and it is why user-supplied recordings (§9.1) are load-bearing rather than merely helpful.
+
+The L3 training mix therefore combines three sources:
+
+| Source | Provides | Licence |
+|---|---|---|
+| [Samrómur Children](https://huggingface.co/datasets/language-and-voice-lab/samromur_children) | Real child speech at scale — teaches the model *child vocal-tract characteristics* generally | CC BY 4.0 |
+| [ivrit.ai](https://arxiv.org/abs/2307.08720) (3,300+ h Hebrew adult speech), warped with ChildAugment | Hebrew-language *phonetics* with child-like vocal-tract parameters | Free; verify terms |
+| User-supplied household recordings (§9.1) | Real bilingual children, real rooms — the evaluation set, and possibly a small fine-tuning set | Consent-gated, never public |
+
+The reasoning behind the split: **what transfers across languages and what does not are different
+things.** Learning "what a child's voice looks like in embedding space" generalizes from Icelandic
+perfectly well — that is why Samrómur is usable despite the language gap. Learning Hebrew phonetic
+realizations does not transfer, which is what the ChildAugment-over-ivrit.ai path supplies. Phase 0
+must verify this reasoning rather than assume it; it is a hypothesis, not a result.
+
+### The wake-phrase channel becomes language-agnostic
+
+L5 originally looked expensive because a trained wake-word model is language-specific, and a Hebrew
+one would have to be built. **Query-by-Example keyword spotting removes that problem entirely:** the
+user enrolls the keyword by recording a few examples, and detection is acoustic similarity to those
+recordings. No Hebrew model, no per-language work — *"אבא"*, *"אמא"*, *"Daddy"*, *"Mummy"*, or a
+nickname all work identically.
+
+Two consequences:
+
+1. **L5 is promoted from stretch goal to a v1 candidate**, reassessed after Phase 0.
+2. **The recordings serve double duty.** Asking the child to call the parent a few times the way they
+   normally do produces both QbyE keyword templates *and* speaker-ID enrollment audio of exactly the
+   utterance type that matters most. One recording session, two purposes, and a more natural
+   enrollment prompt than reading a word list.
+
+### Bidirectional UI
+
+Hebrew is right-to-left. The UI must be bidirectional from the first screen — layout mirroring,
+Hebrew typography, and mixed-direction strings, since a child's name may be in either script while
+the surrounding sentence is in the other. Retrofitting RTL is far more expensive than designing for
+it, and the intervention overlay — the most layout-sensitive screen in the app — is the one that
+would break worst.
+
+---
+
+## 4.3 Go / no-go criteria for Phase 0
+
+Measured on the household-simulation set (§9.1), with L1 and L2 active:
 
 - **Ship:** ≤ 1 false alarm per 2 hours of active listening, at ≥ 80% detection of real
   attention-seeking events within 10 seconds.
@@ -315,6 +394,11 @@ Measured on the household-simulation set defined in §9, with L1 and L2 active:
 - **Fall back:** worse than that after L3. The fallback is Channel A alone — a personalized
   wake-phrase detector with a speaker check, which is a narrower but genuinely useful product, and
   a far more honest one than a text-independent detector that cries wolf.
+
+**Both languages must clear the bar independently.** A system that hits the target in English and
+misses it in Hebrew has not passed — it has one working language and one that will erode the parent's
+trust in the whole app. Report every criterion separately for English, Hebrew, and code-switched
+speech.
 
 ---
 
@@ -507,6 +591,86 @@ not a single number. EER is computed only to compare against published work.
 - The accumulation window length and cooldown that hit the latency budget — a longer window is more
   accurate and slower, and this trade is the core tuning decision of the product.
 - Whether media-playback state is a usable signal for suppressing television false alarms.
+- **Cross-lingual performance (§4.2):** enrol-Hebrew / test-English and the reverse, versus
+  matched-language, versus bilingual enrollment with per-language sub-centroids. This quantifies the
+  40–49% degradation risk on our actual data and validates the mitigation.
+- **Code-switching**, which no benchmark covers and every bilingual household does.
+- Whether the ChildAugment-over-ivrit.ai path (§4.2) measurably beats Samrómur alone on Hebrew.
+
+---
+
+## 9.1 Data collection protocol for supplied recordings
+
+Real household recordings are the only way to evaluate the conditions that decide this product, and
+for Hebrew they are the only child data that exists at all. This section specifies what to collect so
+the effort is not wasted — a re-collection because the metadata was thin is expensive and annoying.
+
+### Consent — settle this before recording anything
+
+Recording children creates real obligations. Written parental consent per child, stating what is
+recorded, what it is used for, where it is stored, how long it is kept, and how to withdraw. If the
+data will ever train a shipped model rather than only evaluate it, say so explicitly in the consent —
+retrofitting that permission later is not possible. Recordings never enter the public repository
+(§11) and are stored encrypted with access limited to named people.
+
+### Who
+
+Target **5–10 households** if achievable; even 3 is far better than none. Per household:
+
+- **1–2 target children.** Spread ages across roughly 3–12; younger voices are the hard case and are
+  worth over-sampling.
+- **Every sibling**, since sibling-vs-target is the hardest confusion the product faces.
+- **Both parents** where applicable — the parent's voice is the one the microphone hears most.
+
+### What, per speaker
+
+Roughly **5 minutes of usable speech**, split deliberately rather than recorded in one block:
+
+| Content | Why |
+|---|---|
+| Spontaneous conversation, **Hebrew** | The realistic condition; read speech flatters the recognizer |
+| Spontaneous conversation, **English** | Required to measure and fix cross-lingual mismatch (§4.2) |
+| **Code-switched** speech, both languages in one utterance | Normal in bilingual homes, absent from every benchmark |
+| The child **calling the parent** — *"אבא!"*, *"Mummy!"* — repeated naturally, ~10× | The single most important event type; also QbyE keyword templates (§4.2) |
+| A short **read passage** in each language | Comparability with published benchmarks |
+
+### Conditions — vary them on purpose
+
+Recognition failures come from acoustics, not just voices. Capture the same speaker across:
+
+- **Distance:** ~1 m and ~3 m from the phone.
+- **Phone placement:** on a table, and in a pocket or face-down.
+- **Background:** quiet; television on; kitchen or general household noise.
+- **Rooms:** at least two, ideally with different reverberation.
+
+### Negative material — as valuable as the voices
+
+- **Television and streaming audio** in Hebrew and English, including children's programming, which
+  is the worst adversary because it *is* children's voices.
+- **Unrelated children** — visitors, cousins, a playground — as open-set impostors.
+- **Silence and room tone** for each room, to calibrate the VAD.
+
+### Longitudinal follow-up
+
+Re-record the same children **after 3–6 months**. Age drift is a documented, measurable degradation
+(§4.1, L4), and without a second timepoint the re-enrollment policy is guesswork. This costs almost
+nothing at collection time and cannot be recovered retroactively.
+
+### Format and labelling
+
+- **16 kHz or higher, mono, uncompressed WAV.** Never lossy-compressed — codec artefacts corrupt
+  exactly the spectral detail speaker embeddings rely on.
+- Record with a phone, not a studio microphone. The target device's own hardware is the deployment
+  condition.
+- Per file: speaker ID (pseudonymous), age, sex, household ID, language, code-switched yes/no,
+  content type, distance, phone placement, background condition, room, and date. Date matters — it is
+  what makes the longitudinal comparison possible.
+
+### Held-out discipline
+
+Split by **household**, never by utterance. Evaluating on a household whose voices appeared in
+training inflates results dramatically and silently. At least two households must be held out and
+touched only for final measurement.
 
 - **Engine unit tests (JVM, no device):** `DetectionEngine`, `VadGate`, `EmbeddingMatcher`,
   `Debouncer` against WAV fixtures. Deterministic, fast, the bulk of the suite.
@@ -533,12 +697,20 @@ not a single number. EER is computed only to compare against published work.
 4. Minimum Android API level.
 5. Distribution intent: personal use, open source, or App/Play Store release? This determines
    whether the Family Controls entitlement request and store-review preparation are in scope.
-6. **Deployment language.** Speaker embeddings are largely language-independent, but the L5
-   wake-phrase channel is not, and the Samrómur mismatch (§4.1) is measured against a specific target
-   language. Needs deciding before Phase 0 assembles its evaluation sets.
-7. Does the project have access to consented recordings of real children for the Phase 0 household
-   simulation set? Without them Phase 0 can only measure the public benchmark, which §4.1 argues is
-   the less informative half.
+**Resolved 2026-08-07:** deployment languages are **English and Hebrew** (see §4.2), and
+**real child recordings will be supplied** by the project (collection protocol in §9.1). These
+answers raised the following in their place:
+
+6. **Consent scope for supplied recordings** — evaluation only, or training too? This must be settled
+   *before* collection, because it cannot be added to a consent form retroactively (§9.1). It decides
+   whether user-supplied Hebrew child speech can enter the L3 fine-tuning mix or only measure it.
+7. **How many households** can realistically be recruited? The Phase 0 held-out split needs at least
+   two households untouched by tuning (§9.1), which sets a hard floor of roughly three.
+8. **ivrit.ai licence terms** — confirm they permit the derivative use in §4.2 (vocal-tract warping to
+   produce child-like Hebrew training data), and whether commercial use is included.
+9. **Who writes and reviews the Hebrew copy?** The app's tone is its most fragile quality (see the UI
+   prompt), and tone does not survive machine translation. A native Hebrew speaker needs to write it,
+   not check it afterwards.
 
 ---
 
@@ -563,7 +735,9 @@ These are product requirements, not aspirations, and each is testable:
 
 - iOS implementation (phase 2; the shared core is designed for it now)
 - Family Controls entitlement request (blocked on distribution intent)
-- L5 wake-phrase channel (§4.1) — a stretch goal for v1, and the designated fallback product if
+- ~~L5 wake-phrase channel — stretch goal~~ **Promoted to a v1 candidate** (§4.2): Query-by-Example
+  keyword spotting is language-agnostic, so Hebrew costs nothing extra, and the enrollment recordings
+  serve double duty. Reassessed after Phase 0. It remains the designated fallback product if
   text-independent accuracy proves inadequate
 - Feature Transform Adapter architecture changes for age robustness (§4.1, L4) — the simpler drift
   mitigations come first
@@ -602,9 +776,31 @@ reported by the authors on their own evaluation sets, and are not directly compa
 - [Incorporation of Speech Duration Information in Score Fusion of Speaker Recognition Systems](https://arxiv.org/pdf/1608.02272)
   — duration-dependent scoring.
 
-**Text-dependent verification**
+**Cross-lingual verification (§4.2)**
+- [Disentangling Speaker and Language Effects in Cross-Lingual Speaker Verification](https://arxiv.org/abs/2607.01161)
+  — bilingual same-speaker evaluation showing language mismatch, not inter-speaker variability, is the
+  main driver of cross-lingual loss.
+- [Spoken language mismatch in speaker verification (NIST-SRE / CRSS Bi-Ling)](https://ieeexplore.ieee.org/document/7078603/)
+  — the 40–49% degradation figure.
+- [Cross-Lingual Speaker Verification with Domain-Balanced Hard Prototype Mining and Language-Dependent Score Normalization](https://arxiv.org/pdf/2007.07689)
+  — per-language score normalization, relevant to the sub-centroid design.
+
+**Text-dependent and keyword spotting (L5)**
 - [Speaker Verification: Text-Dependent vs. Text-Independent](https://www.microsoft.com/en-us/research/project/speaker-verification-text-dependent-vs-text-independent/)
   (Microsoft Research) — the short-utterance advantage underpinning L5.
+- [QbyE-MLPMixer: Query-by-Example Open-Vocabulary Keyword Spotting](https://arxiv.org/pdf/2206.13231)
+  and [Metric Learning for User-defined Keyword Spotting](https://arxiv.org/pdf/2211.00439) — the
+  language-agnostic enrollment approach that makes Hebrew wake-phrases free.
+- [Personalized Keyword Spotting for User-Defined Keywords Leveraging Text-Independent Speaker Verification](https://arxiv.org/html/2606.20106)
+  — combining the keyword and speaker checks, which is exactly Channel A.
+
+**Hebrew speech data (§4.2)**
+- [ivrit.ai](https://arxiv.org/abs/2307.08720) — 3,300+ hours of Hebrew speech, freely usable;
+  **adult** speech, intended here as the base for ChildAugment warping.
+- [HEBDB](https://arxiv.org/pdf/2407.07566) — spontaneous Hebrew dialogue, publicly available.
+- [Building an Accurate Open-Source Hebrew ASR System through Crowdsourcing](https://www.isca-archive.org/interspeech_2025/marmor25_interspeech.pdf)
+  (Interspeech 2025) — 314 h transcribed Hebrew.
+- **No public Hebrew children's speech corpus was found.** This gap is why §9.1 exists.
 
 **Data**
 - [Samrómur Children](https://huggingface.co/datasets/language-and-voice-lab/samromur_children) —

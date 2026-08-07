@@ -35,9 +35,17 @@ top. Spec §4.1 lays out that accuracy ladder with sources, and §9 defines expl
 | `docs/superpowers/specs/2026-08-06-presence-design.md` | The full design specification — architecture, detection pipeline, per-platform intervention design, permissions, failure modes, testing strategy |
 | `docs/design/UI_DESIGN_PROMPT.md` | A self-contained, ready-to-paste prompt for designing the complete UI. Hand it to a fresh Claude session |
 
+**Collecting recordings?** Read **spec §9.1** first. It specifies consent scope, who to record, both
+languages plus code-switching, acoustic conditions, negative material, labelling, and the held-out
+split. Getting the metadata wrong means re-collecting, and consent scope in particular cannot be
+widened retroactively.
+
 ## Planned shape
 
 **Kotlin Multiplatform shared core, native UI per platform.** Android first, iOS second.
+**English and Hebrew** at first release, which makes the UI bidirectional from the first screen and
+makes bilingual voice enrollment mandatory — a child enrolled in one language and heard in the other
+is close to a different-domain trial (spec §4.2).
 
 The sensing engine is pure portable logic; everything touching the OS is a thin adapter. That seam
 matters because the engine is the hard, valuable part while the OS integrations are what differ per

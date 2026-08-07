@@ -66,11 +66,23 @@ like a notification from a compliance system.
 4. **Add a child** — name and photo. The photo is central to the whole experience; make choosing it
    feel meaningful, not like filling a form field.
 5. **Choose enrollment mode** — record a short session together, or import existing recordings.
-6. **Live enrollment session** — the child repeats a few short prompts, about 60 seconds total.
-   Needs live waveform feedback, clear progress, per-clip pass/fail, and a retry path. Design this
-   as something a parent and child do together and might even enjoy.
+6. **Live enrollment session** — the child speaks a few short prompts, roughly 60 seconds per
+   language. Needs live waveform feedback, clear progress, per-clip pass/fail, and a retry path.
+   Design this as something a parent and child do together and might even enjoy.
+
+   Three things make this screen harder than it looks:
+   - **It must collect both Hebrew and English** (see the bilingual section below), so progress is
+     tracked *per language* and the session isn't complete until both are covered. Make switching
+     languages feel like part of the game, not a second chore.
+   - **One prompt is "call me the way you normally do"** — the child says *"אבא!"* or *"Mummy!"* a
+     handful of times. This is the most valuable recording in the whole session and the most natural
+     thing to ask for. Give it its own moment rather than burying it in a word list.
+   - A 60-second attention span is optimistic for a five-year-old. Design for interruption, partial
+     completion, and resuming later without losing progress.
 7. **Import enrollment** — pick videos or voice notes, then confirm which detected speech segments
-   are the child. Needs a segment list with playback and accept/reject.
+   are the child. Needs a segment list with playback and accept/reject. Segments are **language-
+   tagged**, and the screen reports per-language coverage so the parent can see which language is
+   short.
 8. **Enrollment quality feedback** — a clip can be rejected for too much background noise, no
    speech found, or clipping. Show specific, non-technical reasons and what to do about it. Progress
    is reported as **seconds of usable speech collected**, not clips recorded — short clips are
@@ -193,6 +205,31 @@ A design that assumes accuracy is a design that betrays the parent. So:
 - **Missed moments must never be surfaced as failures**, by either party. No "you missed 4 moments"
   counters. That would be a guilt metric, which §Tone forbids.
 
+## Bilingual and bidirectional — English and Hebrew from day one
+
+The first release ships in **English and Hebrew**. Hebrew is right-to-left, so this is a layout
+constraint on every screen, not a translation task at the end.
+
+- **Design RTL and LTR as equal first-class layouts.** Mirror the layout, not the child's photo.
+  Directional icons (back arrows, progress, chevrons) flip; logos, faces, and media controls do not.
+  Retrofitting RTL is far more expensive than designing for it, and the intervention overlay — the
+  most layout-sensitive screen in the app — breaks worst.
+- **Mixed-direction strings are the normal case, not an edge case.** A child's name may be in Hebrew
+  script inside an English sentence or the reverse. *"מאיה is calling you"* must not scramble. Show
+  how you handle this; it is the detail that most often ships broken.
+- **Specify a Hebrew type family** alongside the Latin one, and check that the two are visually
+  compatible at the same optical size. Hebrew has no case distinction and different vertical metrics,
+  so a type scale tuned only on English will look wrong.
+- **Copy length differs.** Hebrew is often more compact than English; layouts must not depend on
+  either. Show at least the intervention overlay and the home screen in both languages.
+- **Tone does not survive machine translation**, and tone is this app's most fragile quality. Treat
+  the Hebrew copy as something a native speaker writes, not something a translator checks. Where a
+  phrase carries emotional weight, note the *intent* so a Hebrew writer can reach for it
+  independently rather than translating word-for-word.
+
+Deliver the intervention overlay, home, and at least one enrollment screen in **both languages and
+both directions**. The rest can be English-only in the mockups provided the RTL rules are documented.
+
 ## Accessibility requirements
 
 - WCAG AA contrast minimum in both themes.
@@ -215,6 +252,7 @@ mirroring Android.
 2. All screens above, with their states.
 3. The component inventory with specifications.
 4. Explicit notes on which screens need different iOS treatment and why.
+5. The bidirectional layout rules, plus the key screens rendered in both English and Hebrew.
 
 **Format:** produce a single self-contained HTML page showing every screen as a phone-framed
 mockup, with a theme toggle for light and dark, plus the design system documented on the same page.
