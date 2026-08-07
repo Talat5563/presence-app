@@ -21,6 +21,31 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 - **EER is not a product target.** Report false alarms per hour and miss rate per real event. EER is computed only for comparison with published work (spec §4.1).
 - **Package root is `app.presence`.** Engine code lives in `app.presence.{audio,domain,engine,enrollment}`; harness code in `app.presence.harness`.
 - **Go / no-go thresholds (spec §4.3):** ship at ≤ 1 false alarm per 2 hours with ≥ 80% of real events detected within 10 s; iterate between that and 2 false alarms per hour or 50% detection; fall back below that.
+- **Two test suites, and no test ever skips itself.** `./gradlew test` runs pure-logic tests that use fakes — no models, no network, green on a fresh clone. Tests needing a real model file are annotated `@Tag("model")`, excluded from `test`, and run by `./gradlew integrationTest`, which **fails loudly** if the model is missing. A test that prints "SKIP" and returns still reports as passing, which is worse than no test at all.
+- **Do not guess tensor names or shapes.** They were verified against the real model files and are recorded below. If a model is ever swapped, re-verify rather than assume.
+
+## Verified environment and model facts
+
+These are established, not assumptions. Implementers should rely on them rather than re-deriving.
+
+**Toolchain** — already installed and on `PATH`: Temurin JDK 17 at `~/.local/toolchains/jdk-17.0.20+8`
+and Gradle 8.11 at `~/.local/toolchains/gradle-8.11`. `java -version` reports 17 and `gradle
+--version` reports 8.11. If a shell reports Java 8, re-source `~/.bashrc`.
+
+**Models** — already downloaded into `models/` (git-ignored), with `models/PROVENANCE.txt` recording
+their URLs:
+
+| File | Signature | Notes |
+|---|---|---|
+| `models/silero_vad.onnx` | in `input [B, samples]`, `state [2, B, 128]`, `sr` (int64 scalar); out `output [B, 1]`, `stateN` | Silero **v5** — a single `state` tensor, not v4's separate `h`/`c` |
+| `models/speaker_embedding.onnx` | in `feats [B, T, 80]`; out `embs [B, 256]` | WeSpeaker `wespeaker_en_voxceleb_resnet34_LM`, 26 MB |
+
+**The embedding model consumes 80-bin log-mel filterbank features, not raw audio.** Every candidate
+checked (WeSpeaker, 3D-Speaker CAM++, NeMo SpeakerNet, NeMo TitaNet) works this way, so Task 13's
+front end is unavoidable rather than a consequence of the model choice.
+
+WeSpeaker was chosen deliberately: L3 fine-tuning (spec §4.1) trains in WeSpeaker and exports ONNX,
+so the improved model will be a drop-in replacement with the same tensor shapes.
 
 ## Design note: interfaces instead of `expect`/`actual`
 
@@ -38,6 +63,9 @@ shared/build.gradle.kts             KMP module, JVM target for now
 shared/src/commonMain/kotlin/app/presence/
   audio/AudioTypes.kt               sample rate constant, ms<->samples conversion
   audio/Framer.kt                   stream -> fixed-size frames, stable across pushes
+  audio/Fft.kt                      radix-2 FFT and real power spectrum
+  audio/MelFilterBank.kt            Kaldi-compatible triangular mel filters
+  audio/FbankExtractor.kt           80-bin log-mel features — what the model actually eats
   domain/Language.kt                ENGLISH, HEBREW
   domain/VoiceProfile.kt            per-language centroids, negatives, role
   domain/DetectionEvent.kt          what the engine emits
@@ -174,8 +202,24 @@ kotlin {
     }
 }
 
+// Two suites (see Global Constraints). `test` runs pure-logic tests only; anything needing a
+// real model file is tagged "model" and runs under `integrationTest`, which fails loudly when
+// the model is absent rather than skipping silently.
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("model")
+    }
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs tests that require the ONNX model files in models/."
+    group = "verification"
+    val jvmTest = tasks.named<Test>("jvmTest").get()
+    testClassesDirs = jvmTest.testClassesDirs
+    classpath = jvmTest.classpath
+    useJUnitPlatform {
+        includeTags("model")
+    }
 }
 ```
 
@@ -265,7 +309,7 @@ git commit -m "feat: Gradle scaffold and audio duration primitives"
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `class Framer(frameSize: Int, hopSize: Int = frameSize)` with `push(samples: FloatArray): List<FloatArray>` and `reset()`. Task 11 and Task 15 feed audio through it.
+- Produces: `class Framer(frameSize: Int, hopSize: Int = frameSize)` with `push(samples: FloatArray): List<FloatArray>` and `reset()`. Task 11 and Task 16 feed audio through it.
 
 Why this exists: the VAD model requires exactly-sized frames, but audio arrives in arbitrary chunks. The Framer holds leftovers between calls so frame boundaries stay stable no matter how the input is chunked — a property the tests pin down explicitly, because getting it wrong produces a VAD that works on files and fails on a live microphone.
 
@@ -1187,7 +1231,7 @@ git commit -m "feat: VadGate segments speech with start/end hysteresis"
 
 **Interfaces:**
 - Consumes: `Embedding`, `centroidOf` (Task 3); `Language`, `VoiceProfile` (Task 4).
-- Produces: `data class EnrollmentClip(language: Language, embedding: Embedding, speechSeconds: Double)`; `data class EnrollmentPolicy(minSecondsPerLanguage: Double = 45.0, requiredLanguages: Set<Language> = setOf(ENGLISH, HEBREW))`; `sealed interface EnrollmentResult` with `Complete(profile)` and `Incomplete(profile, shortfallSeconds)`; `class EnrollmentService(policy)` with `enroll(personId, role, clips): EnrollmentResult`. Tasks 15 and 16 use this to build profiles from corpus audio.
+- Produces: `data class EnrollmentClip(language: Language, embedding: Embedding, speechSeconds: Double)`; `data class EnrollmentPolicy(minSecondsPerLanguage: Double = 45.0, requiredLanguages: Set<Language> = setOf(ENGLISH, HEBREW))`; `sealed interface EnrollmentResult` with `Complete(profile)` and `Incomplete(profile, shortfallSeconds)`; `class EnrollmentService(policy)` with `enroll(personId, role, clips): EnrollmentResult`. Tasks 16 and 17 use this to build profiles from corpus audio.
 
 Two spec rules become executable here. Progress is measured in **seconds of usable speech**, not clip count, because published results show utterances under about a second are near-worthless (spec §5). And enrollment is **not complete until every required language is covered** (spec §4.2) — the returned shortfall map is exactly what the enrollment UI needs to tell a parent which language is still short.
 
@@ -1808,7 +1852,7 @@ git commit -m "feat: HouseholdMatcher scores against the roster, not a fixed thr
 
 **This is the primary accuracy mechanism, not a debouncer.** An earlier draft of the spec treated it as a convenience that stopped the app firing constantly; that was a design error, corrected in §4.1. No decision needs to rest on one 0.9-second word — a child seeking attention talks for tens of seconds, and summing weak per-segment evidence over a window is what turns an unusable per-utterance error rate into a confident decision.
 
-The threshold on the *sum* is therefore the real operating point of the whole product, and Task 16 sweeps it.
+The threshold on the *sum* is therefore the real operating point of the whole product, and Task 17 sweeps it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2030,7 +2074,7 @@ git commit -m "feat: EvidenceAccumulator sums LLR across segments with cooldown"
 
 **Interfaces:**
 - Consumes: `SAMPLE_RATE_HZ` (Task 1); `VadGate`, `SpeechSegment`, `VoiceActivityDetector` (Task 5); `HouseholdMatcher` (Task 7); `EvidenceAccumulator`, `Observation` (Task 8).
-- Produces: `interface SpeakerEmbedder { val dimension: Int; fun embed(samples: FloatArray): Embedding }`; `data class DetectionEvent(personId: String, timestampMs: Long, accumulatedEvidence: Float, peakSimilarity: Float)`; `class DetectionEngineConfig(minEmbedDurationMs, embedWindowMs, embedHopMs)`; `class DetectionEngine(vadGate, embedder, matcher, accumulator, targetPersonId, config)` with `accept(frame: FloatArray): DetectionEvent?`, `flush(): DetectionEvent?`, `reset()`. Task 16 drives it.
+- Produces: `interface SpeakerEmbedder { val dimension: Int; fun embed(samples: FloatArray): Embedding }`; `data class DetectionEvent(personId: String, timestampMs: Long, accumulatedEvidence: Float, peakSimilarity: Float)`; `class DetectionEngineConfig(minEmbedDurationMs, embedWindowMs, embedHopMs)`; `class DetectionEngine(vadGate, embedder, matcher, accumulator, targetPersonId, config)` with `accept(frame: FloatArray): DetectionEvent?`, `flush(): DetectionEvent?`, `reset()`. Task 17 drives it.
 
 This is the class spec §3 promised: it knows nothing about microphones, services, or screens, so the whole recognition pipeline is testable on the JVM.
 
@@ -2366,7 +2410,7 @@ git commit -m "feat: DetectionEngine composes VAD, embedding, matching and accum
 
 **Interfaces:**
 - Consumes: `SAMPLE_RATE_HZ` (Task 1).
-- Produces: `object WavReader` with `read(path: java.nio.file.Path): FloatArray`; `class UnsupportedAudioException(message: String) : Exception(message)`. Tasks 15 and 16 use it.
+- Produces: `object WavReader` with `read(path: java.nio.file.Path): FloatArray`; `class UnsupportedAudioException(message: String) : Exception(message)`. Tasks 16 and 17 use it.
 
 The reader **refuses to resample**. Spec §9.1 requires corpora at 16 kHz mono, and silently resampling would corrupt exactly the spectral detail speaker embeddings depend on. A wrong-format file produces an exception naming the file and giving the exact `ffmpeg` command to fix it — the engineer running Phase 0 over a few thousand files needs the fix, not a stack trace.
 
@@ -2515,8 +2559,21 @@ application {
     mainClass.set("app.presence.harness.MainKt")
 }
 
+// Same two-suite split as :shared — see Global Constraints.
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("model")
+    }
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs tests that require the ONNX model files in models/."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("model")
+    }
 }
 ```
 
@@ -2619,13 +2676,18 @@ git commit -m "feat: harness module with a strict 16 kHz mono WAV reader"
 - Create: `tools/fetch-models.sh`
 - Create: `shared/src/jvmMain/kotlin/app/presence/onnx/OnnxModelSession.kt`
 - Test: `shared/src/jvmTest/kotlin/app/presence/onnx/OnnxModelSessionTest.kt`
-- Modify: `README.md` — add a "Running Phase 0" section pointing at the scripts
+- Modify: `README.md` — add a "Running Phase 0" section
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `class OnnxModelSession(modelPath: java.nio.file.Path) : AutoCloseable` with `inputNames: List<String>`, `outputNames: List<String>`, `describeSignature(): String`, `run(inputs: Map<String, Any>): Map<String, Any>`, and `close()`. Tasks 12 and 13 build on it.
+- Produces: `class OnnxModelSession(modelPath: java.nio.file.Path) : AutoCloseable` with `inputNames: List<String>`, `outputNames: List<String>`, `describeSignature(): String`, `floatTensor(data: FloatArray, shape: LongArray): OnnxTensor`, `runTensors(inputs: Map<String, OnnxTensor>, block: (OrtSession.Result) -> T): T`, and `close()`. Tasks 12 and 14 build on it.
 
-**Read this before implementing.** The exact input and output tensor names differ between models and between versions of the same model — Silero VAD v4 takes separate `h` and `c` state tensors while v5 takes a single `state` tensor, and embedding models vary in whether they expect raw samples or precomputed features. **Do not guess.** Step 3 dumps the real signature and Tasks 12 and 13 are written against what it prints.
+**The model files already exist** in `models/` (see Global Constraints) with their signatures
+verified, so this task does not need to discover anything. The scripts exist for reproducibility —
+a fresh clone, or a future model swap — not because anything here is unknown.
+
+`describeSignature()` earns its place anyway: it is how the next person confirms a swapped model
+before writing an adapter against it, and how you diagnose an ONNX Runtime shape complaint.
 
 - [ ] **Step 1: Write the model-listing script**
 
@@ -2634,7 +2696,10 @@ git commit -m "feat: harness module with a strict 16 kHz mono WAV reader"
 ```bash
 #!/usr/bin/env bash
 # Lists the speaker-recognition models sherpa-onnx publishes, plus the Silero VAD asset.
-# Note the upstream tag really is spelled "recongition".
+# Note the upstream release tag really is spelled "recongition".
+#
+# You do not need this to run Phase 0 — fetch-models.sh already defaults to the chosen model.
+# It exists for swapping models later, e.g. after L3 fine-tuning.
 set -euo pipefail
 
 echo "== sherpa-onnx speaker embedding models =="
@@ -2648,21 +2713,10 @@ echo
 echo "== Silero VAD =="
 echo "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
 echo
-echo "Pick one embedding model. Guidance:"
-echo "  * 'wespeaker-' and '3dspeaker-' prefixes indicate the upstream toolkit."
-echo "  * Prefer an English or multilingual model over a language-specific one."
-echo "  * Note the model's size — it ships inside the app (spec §4)."
-echo "  * CHECK ITS LICENCE before shipping (spec §10, open question 2)."
+echo "NOTE: every one of these consumes filterbank features, not raw audio."
+echo "Check any replacement's signature before trusting the existing adapters,"
+echo "and check its licence before shipping (spec §10, open question 2)."
 ```
-
-Make it executable and run it:
-
-```bash
-chmod +x tools/list-models.sh
-./tools/list-models.sh
-```
-
-Record the chosen embedding model URL — the next step needs it.
 
 - [ ] **Step 2: Write the fetch script**
 
@@ -2672,17 +2726,12 @@ Record the chosen embedding model URL — the next step needs it.
 #!/usr/bin/env bash
 # Downloads the models Phase 0 needs into models/. Binaries are gitignored (*.onnx).
 #
-# Usage: ./tools/fetch-models.sh <embedding-model-url>
-#   Find candidate URLs with ./tools/list-models.sh
+# Usage: ./tools/fetch-models.sh [embedding-model-url]
+#   Defaults to the model Phase 0 was designed around. Run ./tools/list-models.sh for others.
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-  echo "usage: $0 <embedding-model-url>" >&2
-  echo "run ./tools/list-models.sh to see the choices" >&2
-  exit 1
-fi
-
-EMBEDDING_URL="$1"
+DEFAULT_EMBEDDING="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx"
+EMBEDDING_URL="${1:-$DEFAULT_EMBEDDING}"
 VAD_URL="https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
 DEST="models"
 
@@ -2692,11 +2741,10 @@ curl -fsSL "$VAD_URL" -o "$DEST/silero_vad.onnx"
 echo "Fetching speaker embedding model..."
 curl -fsSL "$EMBEDDING_URL" -o "$DEST/speaker_embedding.onnx"
 
-# Record provenance: which model was used is part of every Phase 0 result.
+# Which model produced which numbers is part of every Phase 0 result.
 cat > "$DEST/PROVENANCE.txt" <<PROVENANCE
 vad: $VAD_URL
 embedding: $EMBEDDING_URL
-fetched: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 PROVENANCE
 
 ls -lh "$DEST"
@@ -2704,12 +2752,14 @@ echo
 echo "Recorded provenance in $DEST/PROVENANCE.txt — quote it in any results you report."
 ```
 
-Run it:
+Make both executable and confirm the models are present:
 
 ```bash
-chmod +x tools/fetch-models.sh
-./tools/fetch-models.sh "<url you chose in step 1>"
+chmod +x tools/list-models.sh tools/fetch-models.sh
+ls -lh models/
 ```
+
+They should already be there. If not, run `./tools/fetch-models.sh`.
 
 - [ ] **Step 3: Write the failing test**
 
@@ -2719,15 +2769,13 @@ chmod +x tools/fetch-models.sh
 package app.presence.onnx
 
 import java.nio.file.Path
-import kotlin.io.path.exists
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
-/**
- * These tests need the real model files. Run ./tools/fetch-models.sh first; without them the
- * model-dependent tests skip rather than fail, so the suite stays green on a fresh clone.
- */
+/** Requires the files in models/. Run with ./gradlew :shared:integrationTest */
+@Tag("model")
 class OnnxModelSessionTest {
 
     private val vadModel = Path.of("../models/silero_vad.onnx")
@@ -2739,33 +2787,29 @@ class OnnxModelSessionTest {
             OnnxModelSession(Path.of("../models/not-a-real-model.onnx"))
         }
         assertTrue(failure.message!!.contains("not-a-real-model.onnx"))
+        assertTrue(failure.message!!.contains("fetch-models"), "should say how to fix it")
     }
 
     @Test
-    fun `prints the VAD signature`() {
-        if (!vadModel.exists()) {
-            println("SKIP: ${vadModel.toAbsolutePath()} missing — run ./tools/fetch-models.sh")
-            return
-        }
+    fun `exposes the verified Silero VAD signature`() {
         OnnxModelSession(vadModel).use { session ->
-            println("=== Silero VAD signature ===")
-            println(session.describeSignature())
-            assertTrue(session.inputNames.isNotEmpty())
-            assertTrue(session.outputNames.isNotEmpty())
+            println("=== Silero VAD ===\n${session.describeSignature()}")
+
+            assertTrue("input" in session.inputNames, "inputs were ${session.inputNames}")
+            assertTrue("state" in session.inputNames, "expected v5 single state tensor")
+            assertTrue("sr" in session.inputNames)
+            assertTrue("output" in session.outputNames)
+            assertTrue("stateN" in session.outputNames)
         }
     }
 
     @Test
-    fun `prints the embedding model signature`() {
-        if (!embeddingModel.exists()) {
-            println("SKIP: ${embeddingModel.toAbsolutePath()} missing — run ./tools/fetch-models.sh")
-            return
-        }
+    fun `exposes the verified embedding model signature`() {
         OnnxModelSession(embeddingModel).use { session ->
-            println("=== Speaker embedding signature ===")
-            println(session.describeSignature())
-            assertTrue(session.inputNames.isNotEmpty())
-            assertTrue(session.outputNames.isNotEmpty())
+            println("=== Speaker embedding ===\n${session.describeSignature()}")
+
+            assertTrue("feats" in session.inputNames, "inputs were ${session.inputNames}")
+            assertTrue("embs" in session.outputNames, "outputs were ${session.outputNames}")
         }
     }
 }
@@ -2773,7 +2817,7 @@ class OnnxModelSessionTest {
 
 - [ ] **Step 4: Run the test and verify it fails**
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.OnnxModelSessionTest"`
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.OnnxModelSessionTest"`
 Expected: FAIL — unresolved reference `OnnxModelSession`.
 
 - [ ] **Step 5: Write the implementation**
@@ -2786,15 +2830,15 @@ package app.presence.onnx
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import java.nio.FloatBuffer
 import java.nio.file.Path
 import kotlin.io.path.exists
 
 /**
  * A loaded ONNX model.
  *
- * [describeSignature] exists because input and output tensor names vary by model and by version
- * — Silero VAD v4 takes separate `h` and `c` state tensors while v5 takes one `state` tensor.
- * Adapters are written against what this prints, never against an assumption.
+ * [describeSignature] exists so a swapped model can be checked before an adapter is written
+ * against it — input and output names vary between models and between versions of the same model.
  */
 class OnnxModelSession(modelPath: Path) : AutoCloseable {
 
@@ -2819,11 +2863,11 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
         session.outputInfo.forEach { (name, info) -> appendLine("  $name: ${info.info}") }
     }
 
-    /** Builds a float tensor of the given shape. Caller closes it, or uses [runTensors]. */
+    /** Builds a float tensor of the given shape. [runTensors] closes it for you. */
     fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor =
-        OnnxTensor.createTensor(environment, java.nio.FloatBuffer.wrap(data), shape)
+        OnnxTensor.createTensor(environment, FloatBuffer.wrap(data), shape)
 
-    /** Runs the model and hands the raw result to [block], closing everything afterwards. */
+    /** Runs the model, hands the result to [block], and closes every tensor afterwards. */
     fun <T> runTensors(inputs: Map<String, OnnxTensor>, block: (OrtSession.Result) -> T): T =
         try {
             session.run(inputs).use(block)
@@ -2837,10 +2881,15 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
 }
 ```
 
-- [ ] **Step 6: Run the test and record the signatures**
+- [ ] **Step 6: Run the test and verify it passes**
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.OnnxModelSessionTest" --info`
-Expected: PASS, 3 tests. **Copy the printed signatures somewhere you can see them** — Tasks 12 and 13 are written against them.
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.OnnxModelSessionTest"`
+Expected: PASS, 3 tests, with both signatures printed.
+
+Also confirm the split works — the model tests must not run in the default suite:
+
+Run: `./gradlew :shared:test`
+Expected: PASS, and `OnnxModelSessionTest` does **not** appear.
 
 - [ ] **Step 7: Document the workflow in the README**
 
@@ -2849,10 +2898,12 @@ Add to `README.md`, just before the `## Attribution` heading:
 ```markdown
 ## Running Phase 0
 
+Requires JDK 17 and Gradle 8.11.
+
 ```bash
-./tools/list-models.sh                          # see available embedding models
-./tools/fetch-models.sh "<chosen model url>"    # download into models/ (gitignored)
-./gradlew test                                  # engine + harness unit tests
+./tools/fetch-models.sh                         # download models into models/ (gitignored)
+./gradlew test                                  # pure-logic tests — no models, no network
+./gradlew integrationTest                       # tests that need the real model files
 ./gradlew :harness:run --args="--help"          # evaluation CLI
 ```
 
@@ -2877,11 +2928,14 @@ git commit -m "feat: ONNX session wrapper and model acquisition scripts"
 
 **Interfaces:**
 - Consumes: `VoiceActivityDetector` (Task 5); `OnnxModelSession` (Task 11).
-- Produces: `class SileroVad(session: OnnxModelSession, frameSize: Int = 512) : VoiceActivityDetector, AutoCloseable`. Task 16 constructs it.
+- Produces: `class SileroVad(session: OnnxModelSession, frameSize: Int = 512) : VoiceActivityDetector, AutoCloseable`. Task 17 constructs it.
 
-**Adapt to the signature you recorded in Task 11, Step 6.** The implementation below targets Silero VAD v5, whose signature is three inputs — `input` shaped `[batch, samples]`, `state` shaped `[2, batch, 128]`, and `sr` as an int64 scalar — and two outputs, `output` and `stateN`. **If your dump shows separate `h` and `c` inputs, you have v4:** replace the single state tensor with two `[2, batch, 64]` tensors and carry both across frames. The structure of the class is identical either way; only `run` changes.
+**The signature is verified** (see Global Constraints): this is Silero **v5** — inputs `input
+[B, samples]`, `state [2, B, 128]`, and `sr` as an int64 scalar; outputs `output [B, 1]` and
+`stateN`. That is a single state tensor, not v4's separate `h` and `c`, and the implementation
+below matches it.
 
-Silero at 16 kHz expects exactly 512-sample frames. That is why `Framer` exists.
+Silero at 16 kHz requires exactly 512-sample frames. That is why `Framer` exists.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2890,42 +2944,39 @@ Silero at 16 kHz expects exactly 512-sample frames. That is why `Framer` exists.
 ```kotlin
 package app.presence.onnx
 
+import app.presence.audio.SAMPLE_RATE_HZ
 import java.nio.file.Path
-import kotlin.io.path.exists
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
-/**
- * Needs models/silero_vad.onnx. Run ./tools/fetch-models.sh first; otherwise these skip so a
- * fresh clone stays green.
- */
+/** Requires models/silero_vad.onnx. Run with ./gradlew :shared:integrationTest */
+@Tag("model")
 class SileroVadTest {
 
     private val modelPath = Path.of("../models/silero_vad.onnx")
 
-    private fun withVad(block: (SileroVad) -> Unit) {
-        if (!modelPath.exists()) {
-            println("SKIP: ${modelPath.toAbsolutePath()} missing — run ./tools/fetch-models.sh")
-            return
-        }
+    private fun withVad(block: (SileroVad) -> Unit) =
         SileroVad(OnnxModelSession(modelPath)).use(block)
-    }
 
     private fun silence() = FloatArray(512)
 
     private fun tone(frequencyHz: Double = 220.0) = FloatArray(512) {
-        (0.3 * sin(2 * PI * frequencyHz * it / 16_000.0)).toFloat()
+        (0.3 * sin(2 * PI * frequencyHz * it / SAMPLE_RATE_HZ)).toFloat()
     }
 
-    private fun noise(seed: Int) = Random(seed).let { rng -> FloatArray(512) { rng.nextFloat() * 0.02f - 0.01f } }
+    private fun noise(seed: Int) =
+        Random(seed).let { rng -> FloatArray(512) { rng.nextFloat() * 0.02f - 0.01f } }
 
     @Test
     fun `reports the frame size the model requires`() {
-        withVad { vad -> assertTrue(vad.frameSize == 512) }
+        withVad { vad -> assertEquals(512, vad.frameSize) }
     }
 
     @Test
@@ -2934,6 +2985,7 @@ class SileroVadTest {
             listOf(silence(), tone(), noise(1)).forEach { frame ->
                 val probability = vad.speechProbability(frame)
                 assertTrue(probability in 0f..1f, "probability $probability outside [0,1]")
+                assertTrue(probability.isFinite())
             }
         }
     }
@@ -2954,9 +3006,25 @@ class SileroVadTest {
     }
 
     @Test
+    fun `carries recurrent state between frames`() {
+        withVad { vad ->
+            val first = vad.speechProbability(tone())
+            val tenth = (1..9).map { vad.speechProbability(tone()) }.last()
+
+            assertTrue(
+                abs(first - tenth) > 1e-6f,
+                "state should evolve; got $first then $tenth",
+            )
+        }
+    }
+
+    @Test
     fun `rejects a frame of the wrong size`() {
         withVad { vad ->
-            assertFailsWith<IllegalArgumentException> { vad.speechProbability(FloatArray(256)) }
+            val failure = assertFailsWith<IllegalArgumentException> {
+                vad.speechProbability(FloatArray(256))
+            }
+            assertTrue(failure.message!!.contains("512"))
         }
     }
 
@@ -2969,7 +3037,7 @@ class SileroVadTest {
             val afterReset = vad.speechProbability(tone())
 
             assertTrue(
-                kotlin.math.abs(first - afterReset) < 1e-4f,
+                abs(first - afterReset) < 1e-4f,
                 "expected $first after reset, got $afterReset",
             )
         }
@@ -2979,7 +3047,7 @@ class SileroVadTest {
 
 - [ ] **Step 2: Run the test and verify it fails**
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.SileroVadTest"`
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.SileroVadTest"`
 Expected: FAIL — unresolved reference `SileroVad`.
 
 - [ ] **Step 3: Write the implementation**
@@ -2995,11 +3063,10 @@ import app.presence.audio.SAMPLE_RATE_HZ
 import app.presence.engine.VoiceActivityDetector
 
 /**
- * Silero VAD via ONNX Runtime.
+ * Silero VAD v5 via ONNX Runtime.
  *
- * Written against the v5 signature: inputs `input` [batch, samples], `state` [2, batch, 128],
- * and `sr` (int64 scalar); outputs `output` and `stateN`. If [OnnxModelSession.describeSignature]
- * shows separate `h` and `c` inputs the model is v4 — carry two [2, batch, 64] tensors instead.
+ * Verified signature: inputs `input [B, samples]`, `state [2, B, 128]`, `sr` (int64 scalar);
+ * outputs `output [B, 1]`, `stateN`.
  *
  * The model is recurrent, so state carries between frames and [reset] matters between recordings.
  */
@@ -3032,9 +3099,9 @@ class SileroVad(
             mapOf("input" to audioTensor, "state" to stateTensor, "sr" to rateTensor),
         ) { result ->
             @Suppress("UNCHECKED_CAST")
-            val probability = (result.get(0).value as Array<FloatArray>)[0][0]
+            val probability = (result.get("output").get().value as Array<FloatArray>)[0][0]
             @Suppress("UNCHECKED_CAST")
-            val nextState = result.get(1).value as Array<Array<FloatArray>>
+            val nextState = result.get("stateN").get().value as Array<Array<FloatArray>>
             state = FloatArray(STATE_LAYERS * STATE_SIZE) { index ->
                 nextState[index / STATE_SIZE][0][index % STATE_SIZE]
             }
@@ -3054,37 +3121,629 @@ class SileroVad(
 
 - [ ] **Step 4: Run the test and verify it passes**
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.SileroVadTest"`
-Expected: PASS, 5 tests (or all skipped with a printed SKIP if models are absent).
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.SileroVadTest"`
+Expected: PASS, 6 tests.
 
-If output shapes do not match, print them and adjust the two casts — the `value` of an ONNX
-output is a nested `Array` whose depth equals the tensor rank.
+If a cast fails, print the actual value's class — an ONNX output's `value` is a nested `Array`
+whose depth equals the tensor rank, and `stateN`'s reported shape has dynamic dimensions.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add shared/src/jvmMain/kotlin/app/presence/onnx/SileroVad.kt \
         shared/src/jvmTest/kotlin/app/presence/onnx/SileroVadTest.kt
-git commit -m "feat: Silero VAD adapter over ONNX Runtime"
+git commit -m "feat: Silero VAD v5 adapter over ONNX Runtime"
 ```
 
 ---
 
-### Task 13: OnnxSpeakerEmbedder — the real embedding model
+### Task 13: Filterbank front end — FFT and Kaldi-compatible fbank
+
+**Files:**
+- Create: `shared/src/commonMain/kotlin/app/presence/audio/Fft.kt`
+- Create: `shared/src/commonMain/kotlin/app/presence/audio/MelFilterBank.kt`
+- Create: `shared/src/commonMain/kotlin/app/presence/audio/FbankExtractor.kt`
+- Test: `shared/src/commonTest/kotlin/app/presence/audio/FftTest.kt`
+- Test: `shared/src/commonTest/kotlin/app/presence/audio/FbankExtractorTest.kt`
+
+**Interfaces:**
+- Consumes: `SAMPLE_RATE_HZ` (Task 1).
+- Produces: `object Fft` with `isPowerOfTwo(n: Int): Boolean`, `transform(re: DoubleArray, im: DoubleArray)`, `powerSpectrum(frame: DoubleArray): DoubleArray`; `class MelFilterBank(numBins, fftSize, sampleRate, lowFreqHz, highFreqHz)` with `apply(powerSpectrum: DoubleArray): DoubleArray` and companion `hzToMel(hz: Double): Double` / `melToHz(mel: Double): Double`; `class FbankExtractor(numMelBins: Int = 80, frameLengthMs: Int = 25, frameShiftMs: Int = 10)` with `extract(samples: FloatArray): Array<FloatArray>` returning `[frames][numMelBins]`. Task 14 depends on all of it.
+
+**Why this task exists.** The speaker model's signature was verified against the real file: it is
+`feats [B, T, 80] → embs [B, 256]`. It does **not** accept raw audio — it wants 80-bin log-mel
+filterbank features. Every candidate model checked (WeSpeaker, 3D-Speaker CAM++, NeMo SpeakerNet,
+NeMo TitaNet) takes features rather than a waveform, so this front end is unavoidable regardless of
+which model ships. It lives in `commonMain` because Android and iOS will both need it.
+
+**Getting the parameters exactly right matters more than it looks.** A subtly wrong filterbank does
+not throw — it silently degrades accuracy, and you would spend Phase 0 blaming the model. These
+values match what WeSpeaker uses to train, and must be reproduced exactly:
+
+| Parameter | Value | Note |
+|---|---|---|
+| Mel bins | 80 | the model's input dimension |
+| Frame length | 25 ms → 400 samples | |
+| Frame shift | 10 ms → 160 samples | |
+| FFT size | 512 | 400 rounded up to a power of two |
+| Window | Hamming, `0.54 − 0.46·cos(2πi/(N−1))` | WeSpeaker uses hamming, **not** Kaldi's default povey |
+| Waveform scaling | ×32768 | Kaldi operates on int16-range values; omitting this shifts every log energy |
+| Remove DC offset | yes, per frame | subtract the frame mean before pre-emphasis |
+| Pre-emphasis | 0.97, applied descending | `x[i] -= 0.97·x[i−1]` for `i` from end down to 1, then `x[0] -= 0.97·x[0]` |
+| Dither | 0.0 | none at inference; dithering would make results non-reproducible |
+| Mel scale | `1127·ln(1 + f/700)` | |
+| Frequency range | 20 Hz to 8000 Hz | Kaldi's default low cutoff is 20 Hz |
+| FFT bins used | 256 (`fftSize/2`) | Kaldi excludes the Nyquist bin |
+| Log floor | 1.19209290e-7 | FLT_EPSILON; `ln(max(energy, floor))` |
+| Normalization | subtract each bin's mean over time | mean only, no variance normalization |
+
+Frame count with `snip_edges` semantics: `1 + (samples − 400) / 160`, integer division.
+
+**The FFT is tested against a brute-force DFT**, which is a genuinely strong check — the naive
+transform is obviously correct and independently written, so agreement to floating-point tolerance
+means the fast one is right.
+
+- [ ] **Step 1: Write the failing FFT test**
+
+`shared/src/commonTest/kotlin/app/presence/audio/FftTest.kt`:
+
+```kotlin
+package app.presence.audio
+
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class FftTest {
+
+    /** The obvious, slow, independently-written transform the fast one must agree with. */
+    private fun bruteForceDft(re: DoubleArray, im: DoubleArray): Pair<DoubleArray, DoubleArray> {
+        val n = re.size
+        val outRe = DoubleArray(n)
+        val outIm = DoubleArray(n)
+        for (k in 0 until n) {
+            var sumRe = 0.0
+            var sumIm = 0.0
+            for (t in 0 until n) {
+                val angle = -2.0 * PI * k * t / n
+                sumRe += re[t] * cos(angle) - im[t] * sin(angle)
+                sumIm += re[t] * sin(angle) + im[t] * cos(angle)
+            }
+            outRe[k] = sumRe
+            outIm[k] = sumIm
+        }
+        return outRe to outIm
+    }
+
+    @Test
+    fun `recognizes powers of two`() {
+        listOf(1, 2, 4, 512).forEach { assertTrue(Fft.isPowerOfTwo(it), "$it is a power of two") }
+        listOf(0, 3, 400, -8).forEach { assertTrue(!Fft.isPowerOfTwo(it), "$it is not") }
+    }
+
+    @Test
+    fun `agrees with a brute-force DFT on random input`() {
+        val random = Random(42)
+        val n = 64
+        val re = DoubleArray(n) { random.nextDouble(-1.0, 1.0) }
+        val im = DoubleArray(n) { random.nextDouble(-1.0, 1.0) }
+        val (expectedRe, expectedIm) = bruteForceDft(re, im)
+
+        val actualRe = re.copyOf()
+        val actualIm = im.copyOf()
+        Fft.transform(actualRe, actualIm)
+
+        for (k in 0 until n) {
+            assertTrue(abs(expectedRe[k] - actualRe[k]) < 1e-9, "real part at $k")
+            assertTrue(abs(expectedIm[k] - actualIm[k]) < 1e-9, "imaginary part at $k")
+        }
+    }
+
+    @Test
+    fun `transforms a constant signal to a single DC spike`() {
+        val n = 8
+        val re = DoubleArray(n) { 1.0 }
+        val im = DoubleArray(n)
+
+        Fft.transform(re, im)
+
+        assertTrue(abs(8.0 - re[0]) < 1e-9, "DC bin should hold the sum, got ${re[0]}")
+        for (k in 1 until n) assertTrue(abs(re[k]) < 1e-9 && abs(im[k]) < 1e-9, "bin $k should be zero")
+    }
+
+    @Test
+    fun `power spectrum peaks at the frequency of a pure tone`() {
+        val n = 512
+        val binOfInterest = 40
+        val frame = DoubleArray(n) { cos(2.0 * PI * binOfInterest * it / n) }
+
+        val power = Fft.powerSpectrum(frame)
+
+        assertEquals(n / 2 + 1, power.size)
+        val peak = power.indices.maxBy { power[it] }
+        assertEquals(binOfInterest, peak)
+    }
+
+    @Test
+    fun `power spectrum is never negative`() {
+        val random = Random(7)
+        val power = Fft.powerSpectrum(DoubleArray(256) { random.nextDouble(-1.0, 1.0) })
+
+        assertTrue(power.all { it >= 0.0 })
+    }
+
+    @Test
+    fun `rejects a non-power-of-two size`() {
+        assertFailsWith<IllegalArgumentException> { Fft.transform(DoubleArray(3), DoubleArray(3)) }
+    }
+
+    @Test
+    fun `rejects mismatched real and imaginary lengths`() {
+        assertFailsWith<IllegalArgumentException> { Fft.transform(DoubleArray(4), DoubleArray(8)) }
+    }
+}
+```
+
+- [ ] **Step 2: Run it and verify it fails**
+
+Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.FftTest"`
+Expected: FAIL — unresolved reference `Fft`.
+
+- [ ] **Step 3: Write the FFT**
+
+`shared/src/commonMain/kotlin/app/presence/audio/Fft.kt`:
+
+```kotlin
+package app.presence.audio
+
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
+/** Iterative in-place radix-2 Cooley-Tukey FFT. */
+object Fft {
+
+    fun isPowerOfTwo(n: Int): Boolean = n > 0 && (n and (n - 1)) == 0
+
+    /** Transforms [re] and [im] in place. Both must be the same power-of-two length. */
+    fun transform(re: DoubleArray, im: DoubleArray) {
+        require(re.size == im.size) {
+            "real and imaginary parts must be the same length: ${re.size} vs ${im.size}"
+        }
+        val n = re.size
+        require(isPowerOfTwo(n)) { "FFT size must be a power of two, was $n" }
+
+        // Bit-reversal permutation.
+        var j = 0
+        for (i in 1 until n) {
+            var bit = n shr 1
+            while (j and bit != 0) {
+                j = j xor bit
+                bit = bit shr 1
+            }
+            j = j xor bit
+            if (i < j) {
+                val tempRe = re[i]; re[i] = re[j]; re[j] = tempRe
+                val tempIm = im[i]; im[i] = im[j]; im[j] = tempIm
+            }
+        }
+
+        var length = 2
+        while (length <= n) {
+            val angle = -2.0 * PI / length
+            val stepRe = cos(angle)
+            val stepIm = sin(angle)
+            var block = 0
+            while (block < n) {
+                var twiddleRe = 1.0
+                var twiddleIm = 0.0
+                val half = length / 2
+                for (k in 0 until half) {
+                    val upperRe = re[block + k]
+                    val upperIm = im[block + k]
+                    val lowerRe = re[block + k + half] * twiddleRe - im[block + k + half] * twiddleIm
+                    val lowerIm = re[block + k + half] * twiddleIm + im[block + k + half] * twiddleRe
+                    re[block + k] = upperRe + lowerRe
+                    im[block + k] = upperIm + lowerIm
+                    re[block + k + half] = upperRe - lowerRe
+                    im[block + k + half] = upperIm - lowerIm
+                    val nextTwiddleRe = twiddleRe * stepRe - twiddleIm * stepIm
+                    twiddleIm = twiddleRe * stepIm + twiddleIm * stepRe
+                    twiddleRe = nextTwiddleRe
+                }
+                block += length
+            }
+            length = length shl 1
+        }
+    }
+
+    /** |X[k]|² for k in 0..n/2 inclusive. [frame] is not modified. */
+    fun powerSpectrum(frame: DoubleArray): DoubleArray {
+        val re = frame.copyOf()
+        val im = DoubleArray(frame.size)
+        transform(re, im)
+        return DoubleArray(frame.size / 2 + 1) { k -> re[k] * re[k] + im[k] * im[k] }
+    }
+}
+```
+
+- [ ] **Step 4: Run it and verify it passes**
+
+Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.FftTest"`
+Expected: PASS, 7 tests.
+
+- [ ] **Step 5: Write the failing fbank test**
+
+`shared/src/commonTest/kotlin/app/presence/audio/FbankExtractorTest.kt`:
+
+```kotlin
+package app.presence.audio
+
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sin
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class FbankExtractorTest {
+
+    private val extractor = FbankExtractor()
+
+    private fun tone(frequencyHz: Double, samples: Int) = FloatArray(samples) {
+        (0.5 * sin(2.0 * PI * frequencyHz * it / SAMPLE_RATE_HZ)).toFloat()
+    }
+
+    // --- mel scale ---
+
+    @Test
+    fun `mel conversion round trips`() {
+        listOf(20.0, 440.0, 1_000.0, 8_000.0).forEach { hz ->
+            val roundTripped = MelFilterBank.melToHz(MelFilterBank.hzToMel(hz))
+            assertTrue(abs(hz - roundTripped) < 1e-6, "expected $hz, got $roundTripped")
+        }
+    }
+
+    @Test
+    fun `mel scale is monotonic and compresses high frequencies`() {
+        val lowSpan = MelFilterBank.hzToMel(1_100.0) - MelFilterBank.hzToMel(100.0)
+        val highSpan = MelFilterBank.hzToMel(7_000.0) - MelFilterBank.hzToMel(6_000.0)
+
+        assertTrue(MelFilterBank.hzToMel(100.0) < MelFilterBank.hzToMel(1_000.0))
+        assertTrue(lowSpan > highSpan, "a low-frequency kHz should span more mels than a high one")
+    }
+
+    @Test
+    fun `every mel filter has some non-zero weight`() {
+        val bank = MelFilterBank()
+        val allOnes = DoubleArray(512 / 2 + 1) { 1.0 }
+
+        val energies = bank.apply(allOnes)
+
+        assertEquals(80, energies.size)
+        energies.forEachIndexed { bin, energy ->
+            assertTrue(energy > 0.0, "mel bin $bin has no weight at all")
+        }
+    }
+
+    @Test
+    fun `mel filters are ordered so a higher tone excites a higher bin`() {
+        val bank = MelFilterBank()
+        val lowPeak = bank.apply(spikeAt(hz = 300.0)).let { it.indices.maxBy { i -> it[i] } }
+        val highPeak = bank.apply(spikeAt(hz = 3_000.0)).let { it.indices.maxBy { i -> it[i] } }
+
+        assertTrue(lowPeak < highPeak, "300 Hz peaked at $lowPeak, 3000 Hz at $highPeak")
+    }
+
+    private fun spikeAt(hz: Double): DoubleArray {
+        val bin = (hz * 512 / SAMPLE_RATE_HZ).toInt()
+        return DoubleArray(512 / 2 + 1) { if (it == bin) 1.0 else 0.0 }
+    }
+
+    // --- extraction ---
+
+    @Test
+    fun `produces 80 bins per frame`() {
+        val features = extractor.extract(tone(440.0, SAMPLE_RATE_HZ))
+
+        assertTrue(features.isNotEmpty())
+        features.forEach { assertEquals(80, it.size) }
+    }
+
+    @Test
+    fun `frame count follows the snip-edges formula`() {
+        // 16000 samples: 1 + (16000 - 400) / 160 = 98 frames.
+        assertEquals(98, extractor.extract(tone(440.0, 16_000)).size)
+        // Exactly one frame's worth of samples yields exactly one frame.
+        assertEquals(1, extractor.extract(tone(440.0, 400)).size)
+        // One shift more yields one frame more.
+        assertEquals(2, extractor.extract(tone(440.0, 560)).size)
+    }
+
+    @Test
+    fun `rejects audio shorter than one frame`() {
+        assertFailsWith<IllegalArgumentException> { extractor.extract(tone(440.0, 399)) }
+    }
+
+    @Test
+    fun `is deterministic`() {
+        val samples = tone(440.0, 8_000)
+
+        val first = extractor.extract(samples)
+        val second = extractor.extract(samples.copyOf())
+
+        first.forEachIndexed { frame, row ->
+            row.forEachIndexed { bin, value ->
+                assertEquals(value, second[frame][bin], "frame $frame bin $bin differs")
+            }
+        }
+    }
+
+    @Test
+    fun `produces no NaN or infinity, even for digital silence`() {
+        val features = extractor.extract(FloatArray(8_000))
+
+        features.forEach { row ->
+            row.forEach { assertTrue(it.isFinite(), "non-finite value $it in silence") }
+        }
+    }
+
+    @Test
+    fun `mean normalization leaves each bin centred on zero`() {
+        val features = extractor.extract(tone(440.0, 16_000))
+
+        for (bin in 0 until 80) {
+            var sum = 0.0
+            for (frame in features) sum += frame[bin]
+            val mean = sum / features.size
+            assertTrue(abs(mean) < 1e-3, "bin $bin has mean $mean after normalization")
+        }
+    }
+
+    @Test
+    fun `a higher tone shifts energy into higher mel bins`() {
+        val low = extractor.extract(tone(300.0, 8_000))
+        val high = extractor.extract(tone(3_000.0, 8_000))
+
+        val lowPeak = peakBin(low)
+        val highPeak = peakBin(high)
+
+        assertTrue(lowPeak < highPeak, "300 Hz peaked at bin $lowPeak, 3000 Hz at bin $highPeak")
+    }
+
+    private fun peakBin(features: Array<FloatArray>): Int {
+        val middle = features[features.size / 2]
+        return middle.indices.maxBy { middle[it] }
+    }
+}
+```
+
+- [ ] **Step 6: Run it and verify it fails**
+
+Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.FbankExtractorTest"`
+Expected: FAIL — unresolved reference `FbankExtractor`.
+
+- [ ] **Step 7: Write the mel filterbank**
+
+`shared/src/commonMain/kotlin/app/presence/audio/MelFilterBank.kt`:
+
+```kotlin
+package app.presence.audio
+
+import kotlin.math.exp
+import kotlin.math.ln
+
+/**
+ * Triangular mel filters, matching Kaldi's `MelBanks` so features line up with what the speaker
+ * model was trained on.
+ *
+ * Kaldi uses `fftSize / 2` spectrum bins and excludes the Nyquist bin; reproducing that exactly
+ * matters, because an off-by-one here shifts every filter slightly and quietly costs accuracy.
+ */
+class MelFilterBank(
+    val numBins: Int = 80,
+    val fftSize: Int = 512,
+    val sampleRate: Int = SAMPLE_RATE_HZ,
+    val lowFreqHz: Double = 20.0,
+    val highFreqHz: Double = sampleRate / 2.0,
+) {
+    private val numFftBins = fftSize / 2
+    private val weights: Array<DoubleArray>
+
+    init {
+        require(numBins > 0) { "numBins must be positive" }
+        require(Fft.isPowerOfTwo(fftSize)) { "fftSize must be a power of two" }
+        require(lowFreqHz < highFreqHz) { "lowFreqHz must be below highFreqHz" }
+
+        val melLow = hzToMel(lowFreqHz)
+        val melHigh = hzToMel(highFreqHz)
+        val melDelta = (melHigh - melLow) / (numBins + 1)
+        val hzPerBin = sampleRate.toDouble() / fftSize
+
+        weights = Array(numBins) { bin ->
+            val left = melLow + bin * melDelta
+            val center = left + melDelta
+            val right = center + melDelta
+            DoubleArray(numFftBins) { k ->
+                val mel = hzToMel(k * hzPerBin)
+                when {
+                    mel > left && mel <= center -> (mel - left) / (center - left)
+                    mel > center && mel < right -> (right - mel) / (right - center)
+                    else -> 0.0
+                }
+            }
+        }
+    }
+
+    /** Sums [powerSpectrum] under each triangular filter. */
+    fun apply(powerSpectrum: DoubleArray): DoubleArray {
+        require(powerSpectrum.size >= numFftBins) {
+            "power spectrum has ${powerSpectrum.size} bins, need at least $numFftBins"
+        }
+        return DoubleArray(numBins) { bin ->
+            val filter = weights[bin]
+            var energy = 0.0
+            for (k in 0 until numFftBins) energy += filter[k] * powerSpectrum[k]
+            energy
+        }
+    }
+
+    companion object {
+        fun hzToMel(hz: Double): Double = 1127.0 * ln(1.0 + hz / 700.0)
+        fun melToHz(mel: Double): Double = 700.0 * (exp(mel / 1127.0) - 1.0)
+    }
+}
+```
+
+- [ ] **Step 8: Write the extractor**
+
+`shared/src/commonMain/kotlin/app/presence/audio/FbankExtractor.kt`:
+
+```kotlin
+package app.presence.audio
+
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.ln
+import kotlin.math.max
+
+/**
+ * 80-bin log-mel filterbank features, matching what the speaker model expects
+ * (`feats [B, T, 80]`).
+ *
+ * Every constant here mirrors the configuration the model was trained with. A mismatch does not
+ * throw — it silently degrades accuracy, which is the worst possible failure mode for this project
+ * because it looks like a bad model rather than a bad front end.
+ */
+class FbankExtractor(
+    private val numMelBins: Int = 80,
+    frameLengthMs: Int = 25,
+    frameShiftMs: Int = 10,
+    private val sampleRate: Int = SAMPLE_RATE_HZ,
+    private val preEmphasis: Double = 0.97,
+) {
+    private companion object {
+        /** FLT_EPSILON, matching Kaldi's log floor. */
+        const val LOG_FLOOR = 1.19209290e-7
+
+        /** Kaldi operates on int16-range values; omitting this shifts every log energy. */
+        const val INT16_SCALE = 32768.0
+    }
+
+    private val frameLength = sampleRate * frameLengthMs / 1_000
+    private val frameShift = sampleRate * frameShiftMs / 1_000
+    private val fftSize = generateSequence(1) { it * 2 }.first { it >= frameLength }
+
+    /** Hamming. WeSpeaker trains with this, not Kaldi's default povey window. */
+    private val window = DoubleArray(frameLength) {
+        0.54 - 0.46 * cos(2.0 * PI * it / (frameLength - 1))
+    }
+
+    private val melBank = MelFilterBank(numMelBins, fftSize, sampleRate)
+
+    /** Returns `[frames][numMelBins]`, mean-normalized per bin across time. */
+    fun extract(samples: FloatArray): Array<FloatArray> {
+        require(samples.size >= frameLength) {
+            "need at least $frameLength samples for one frame, got ${samples.size}"
+        }
+
+        val frameCount = 1 + (samples.size - frameLength) / frameShift
+        val features = Array(frameCount) { FloatArray(numMelBins) }
+        val buffer = DoubleArray(fftSize)
+
+        for (frame in 0 until frameCount) {
+            val offset = frame * frameShift
+
+            for (i in 0 until frameLength) buffer[i] = samples[offset + i] * INT16_SCALE
+            for (i in frameLength until fftSize) buffer[i] = 0.0
+
+            // Remove the frame's DC offset.
+            var sum = 0.0
+            for (i in 0 until frameLength) sum += buffer[i]
+            val mean = sum / frameLength
+            for (i in 0 until frameLength) buffer[i] -= mean
+
+            // Pre-emphasis, applied descending so each sample sees its untouched predecessor.
+            for (i in frameLength - 1 downTo 1) buffer[i] -= preEmphasis * buffer[i - 1]
+            buffer[0] -= preEmphasis * buffer[0]
+
+            for (i in 0 until frameLength) buffer[i] *= window[i]
+
+            val energies = melBank.apply(Fft.powerSpectrum(buffer))
+            for (bin in 0 until numMelBins) {
+                features[frame][bin] = ln(max(energies[bin], LOG_FLOOR)).toFloat()
+            }
+        }
+
+        subtractMeanOverTime(features)
+        return features
+    }
+
+    /** Mean normalization per bin. Mean only — the model was trained without variance norm. */
+    private fun subtractMeanOverTime(features: Array<FloatArray>) {
+        for (bin in 0 until numMelBins) {
+            var sum = 0.0
+            for (frame in features) sum += frame[bin]
+            val mean = (sum / features.size).toFloat()
+            for (frame in features) frame[bin] -= mean
+        }
+    }
+}
+```
+
+- [ ] **Step 9: Run the tests and verify they pass**
+
+Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.*"`
+Expected: PASS — FftTest 7, FbankExtractorTest 11, plus the earlier audio tests.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add shared/src/commonMain/kotlin/app/presence/audio/Fft.kt \
+        shared/src/commonMain/kotlin/app/presence/audio/MelFilterBank.kt \
+        shared/src/commonMain/kotlin/app/presence/audio/FbankExtractor.kt \
+        shared/src/commonTest/kotlin/app/presence/audio/FftTest.kt \
+        shared/src/commonTest/kotlin/app/presence/audio/FbankExtractorTest.kt
+git commit -m "feat: Kaldi-compatible 80-bin filterbank front end"
+```
+
+---
+
+### Task 14: OnnxSpeakerEmbedder — the real embedding model
 
 **Files:**
 - Create: `shared/src/jvmMain/kotlin/app/presence/onnx/OnnxSpeakerEmbedder.kt`
 - Test: `shared/src/jvmTest/kotlin/app/presence/onnx/OnnxSpeakerEmbedderTest.kt`
 
 **Interfaces:**
-- Consumes: `Embedding`, `SpeakerEmbedder`, `cosine` (Tasks 3, 9); `OnnxModelSession` (Task 11).
-- Produces: `class OnnxSpeakerEmbedder(session: OnnxModelSession, inputName: String, outputName: String) : SpeakerEmbedder, AutoCloseable`, with a `dimension` discovered on first use. Task 16 constructs it.
+- Consumes: `Embedding`, `SpeakerEmbedder`, `cosine` (Tasks 3, 9); `FbankExtractor` (Task 13); `OnnxModelSession` (Task 11).
+- Produces: `class OnnxSpeakerEmbedder(session: OnnxModelSession, fbank: FbankExtractor = FbankExtractor(), inputName: String = "feats", outputName: String = "embs") : SpeakerEmbedder, AutoCloseable` with `dimension` discovered on first use. Task 17 constructs it.
 
-**Again, adapt to your recorded signature.** Most sherpa-onnx speaker models take raw 16 kHz samples shaped `[batch, samples]` and return `[batch, dimension]`. Some expect precomputed fbank features instead — if the input shape has three dimensions, that is what you have, and you must add a filterbank front end. Check before writing.
+**The signature is verified, not assumed.** The shipped model was inspected directly:
 
-Input and output names are constructor parameters rather than hardcoded, precisely because they vary between models.
+```
+feats: [B, T, 80]  ->  embs: [B, 256]
+```
 
-The interesting test here is the last one: **the same speaker's two utterances must score higher against each other than against a different speaker's.** That is the entire product hypothesis in one assertion. It uses synthetic signals, so it proves only that the plumbing is right, not that the model works on children — that is what Phase 0's real corpora are for.
+So the embedder's job is: samples → `FbankExtractor` → `[1, T, 80]` tensor → model → 256 floats →
+`Embedding.ofNormalized`. Tensor names default to the verified `feats` and `embs` but stay
+constructor parameters, because a fine-tuned replacement model (spec §4.1, L3) could export
+different names.
+
+**On testing this honestly.** These tests prove the *plumbing* — that features reach the model in
+the right shape and a unit-length 256-dim vector comes back. They cannot prove the model
+discriminates children's voices, because synthetic tones are far outside its training distribution
+and real separation is what Task 17 measures on actual corpora. The synthetic-voice check therefore
+**reports** its similarity numbers for human inspection while asserting only what must be true
+regardless: finite values in `[-1, 1]`. An assertion about the *ordering* of synthetic-tone
+similarities would be a coin flip dressed up as a test.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3093,38 +3752,33 @@ The interesting test here is the last one: **the same speaker's two utterances m
 ```kotlin
 package app.presence.onnx
 
+import app.presence.audio.SAMPLE_RATE_HZ
 import app.presence.engine.cosine
 import java.nio.file.Path
-import kotlin.io.path.exists
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
+/** Requires models/speaker_embedding.onnx. Run with ./gradlew :shared:integrationTest */
+@Tag("model")
 class OnnxSpeakerEmbedderTest {
 
     private val modelPath = Path.of("../models/speaker_embedding.onnx")
 
-    /** Replace with the names printed by OnnxModelSessionTest in Task 11. */
-    private val inputName = "feats"
-    private val outputName = "embs"
-
-    private fun withEmbedder(block: (OnnxSpeakerEmbedder) -> Unit) {
-        if (!modelPath.exists()) {
-            println("SKIP: ${modelPath.toAbsolutePath()} missing — run ./tools/fetch-models.sh")
-            return
-        }
-        OnnxSpeakerEmbedder(OnnxModelSession(modelPath), inputName, outputName).use(block)
-    }
+    private fun withEmbedder(block: (OnnxSpeakerEmbedder) -> Unit) =
+        OnnxSpeakerEmbedder(OnnxModelSession(modelPath)).use(block)
 
     /** A crude voice-like signal: a fundamental plus two harmonics. */
     private fun voice(fundamentalHz: Double, seconds: Double = 2.0): FloatArray {
-        val count = (seconds * 16_000).toInt()
+        val count = (seconds * SAMPLE_RATE_HZ).toInt()
         return FloatArray(count) { i ->
-            val t = i / 16_000.0
+            val t = i / SAMPLE_RATE_HZ.toDouble()
             (0.4 * sin(2 * PI * fundamentalHz * t) +
                 0.2 * sin(2 * PI * fundamentalHz * 2 * t) +
                 0.1 * sin(2 * PI * fundamentalHz * 3 * t)).toFloat()
@@ -3143,10 +3797,19 @@ class OnnxSpeakerEmbedderTest {
     }
 
     @Test
-    fun `reports a plausible dimension`() {
+    fun `produces the 256 dimensions the model declares`() {
         withEmbedder { embedder ->
-            embedder.embed(voice(180.0))
-            assertTrue(embedder.dimension in 64..1024, "unexpected dimension ${embedder.dimension}")
+            assertEquals(256, embedder.embed(voice(180.0)).dimension)
+            assertEquals(256, embedder.dimension)
+        }
+    }
+
+    @Test
+    fun `every component is finite`() {
+        withEmbedder { embedder ->
+            embedder.embed(voice(180.0)).values.forEach {
+                assertTrue(it.isFinite(), "non-finite component $it")
+            }
         }
     }
 
@@ -3162,20 +3825,31 @@ class OnnxSpeakerEmbedderTest {
     }
 
     @Test
-    fun `separates two different synthetic voices`() {
+    fun `handles utterances of different lengths`() {
         withEmbedder { embedder ->
-            // Same "speaker", two different utterance lengths.
+            // T varies with duration; the model takes a dynamic time axis.
+            listOf(1.0, 2.0, 5.0).forEach { seconds ->
+                assertEquals(256, embedder.embed(voice(180.0, seconds)).dimension)
+            }
+        }
+    }
+
+    @Test
+    fun `reports synthetic voice separation for inspection`() {
+        withEmbedder { embedder ->
             val speakerAFirst = embedder.embed(voice(120.0, seconds = 2.0))
             val speakerASecond = embedder.embed(voice(120.0, seconds = 3.0))
             val speakerB = embedder.embed(voice(260.0, seconds = 2.0))
 
             val sameSpeaker = cosine(speakerAFirst, speakerASecond)
             val differentSpeaker = cosine(speakerAFirst, speakerB)
+            println("synthetic same-speaker=$sameSpeaker different-speaker=$differentSpeaker")
 
-            assertTrue(
-                sameSpeaker > differentSpeaker,
-                "same-speaker similarity $sameSpeaker should exceed cross-speaker $differentSpeaker",
-            )
+            // Only what must hold regardless of how the model treats synthetic tones. Real
+            // separation is measured on actual corpora in Task 17 — asserting an ordering here
+            // would be a coin flip, because these tones are far outside the training distribution.
+            assertTrue(sameSpeaker.isFinite() && sameSpeaker in -1f..1f, "got $sameSpeaker")
+            assertTrue(differentSpeaker.isFinite() && differentSpeaker in -1f..1f, "got $differentSpeaker")
         }
     }
 
@@ -3190,7 +3864,7 @@ class OnnxSpeakerEmbedderTest {
 
 - [ ] **Step 2: Run the test and verify it fails**
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.OnnxSpeakerEmbedderTest"`
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.OnnxSpeakerEmbedderTest"`
 Expected: FAIL — unresolved reference `OnnxSpeakerEmbedder`.
 
 - [ ] **Step 3: Write the implementation**
@@ -3200,6 +3874,7 @@ Expected: FAIL — unresolved reference `OnnxSpeakerEmbedder`.
 ```kotlin
 package app.presence.onnx
 
+import app.presence.audio.FbankExtractor
 import app.presence.audio.SAMPLE_RATE_HZ
 import app.presence.audio.millisToSamples
 import app.presence.engine.Embedding
@@ -3208,17 +3883,16 @@ import app.presence.engine.SpeakerEmbedder
 /**
  * A speaker-embedding model via ONNX Runtime.
  *
- * Tensor names are constructor parameters rather than constants because they differ between
- * models — check [OnnxModelSession.describeSignature] and pass what it prints.
- *
- * Assumes the model consumes raw 16 kHz samples shaped [batch, samples] and returns
- * [batch, dimension]. If your signature shows a rank-3 input the model wants precomputed
- * filterbank features instead, and a front end has to be added here.
+ * The shipped model's verified signature is `feats [B, T, 80] -> embs [B, 256]`: it consumes
+ * log-mel filterbank features, not raw audio, so [FbankExtractor] runs first. Tensor names stay
+ * constructor parameters because a fine-tuned replacement (spec §4.1, L3) may export different
+ * ones.
  */
 class OnnxSpeakerEmbedder(
     private val session: OnnxModelSession,
-    private val inputName: String,
-    private val outputName: String,
+    private val fbank: FbankExtractor = FbankExtractor(),
+    private val inputName: String = "feats",
+    private val outputName: String = "embs",
 ) : SpeakerEmbedder, AutoCloseable {
 
     private companion object {
@@ -3237,11 +3911,20 @@ class OnnxSpeakerEmbedder(
     override fun embed(samples: FloatArray): Embedding {
         val minimumSamples = millisToSamples(MIN_DURATION_MS)
         require(samples.size >= minimumSamples) {
-            "need at least $MIN_DURATION_MS ms (${minimumSamples} samples) at $SAMPLE_RATE_HZ Hz, " +
+            "need at least $MIN_DURATION_MS ms ($minimumSamples samples) at $SAMPLE_RATE_HZ Hz, " +
                 "got ${samples.size}"
         }
 
-        val tensor = session.floatTensor(samples.copyOf(), longArrayOf(1, samples.size.toLong()))
+        val features = fbank.extract(samples)
+        val frames = features.size
+        val bins = features[0].size
+
+        // Flatten [T][80] into the [1, T, 80] tensor the model declares.
+        val flat = FloatArray(frames * bins)
+        for (frame in 0 until frames) {
+            features[frame].copyInto(flat, frame * bins)
+        }
+        val tensor = session.floatTensor(flat, longArrayOf(1, frames.toLong(), bins.toLong()))
 
         return session.runTensors(mapOf(inputName to tensor)) { result ->
             @Suppress("UNCHECKED_CAST")
@@ -3258,30 +3941,27 @@ class OnnxSpeakerEmbedder(
 }
 ```
 
-- [ ] **Step 4: Fix the tensor names in the test**
+- [ ] **Step 4: Run the test and verify it passes**
 
-Replace `inputName` and `outputName` in the test with the actual names from Task 11 Step 6. If the run fails with an unknown-input error, ONNX Runtime lists the valid names in the exception — use those.
+Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.OnnxSpeakerEmbedderTest"`
+Expected: PASS, 7 tests. The separation test prints its similarity numbers — record them in your
+report, they are the first real signal about the model.
 
-- [ ] **Step 5: Run the test and verify it passes**
+If ONNX Runtime rejects the input, its exception lists the names and shapes it expected; compare
+against `OnnxModelSession.describeSignature()` and adjust the constructor parameters rather than
+guessing.
 
-Run: `./gradlew :shared:jvmTest --tests "app.presence.onnx.OnnxSpeakerEmbedderTest"`
-Expected: PASS, 5 tests.
-
-If `separates two different synthetic voices` fails, do not treat it as a plumbing bug — synthetic
-tones are far outside the model's training distribution. Confirm the other four pass, then note it
-and move on; Task 16 measures the model on real speech, which is the measurement that counts.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add shared/src/jvmMain/kotlin/app/presence/onnx/OnnxSpeakerEmbedder.kt \
         shared/src/jvmTest/kotlin/app/presence/onnx/OnnxSpeakerEmbedderTest.kt
-git commit -m "feat: ONNX speaker embedding adapter"
+git commit -m "feat: ONNX speaker embedding adapter with filterbank front end"
 ```
 
 ---
 
-### Task 14: Manifest — the corpus metadata format
+### Task 15: Manifest — the corpus metadata format
 
 **Files:**
 - Create: `harness/src/main/kotlin/app/presence/harness/Csv.kt`
@@ -3290,7 +3970,7 @@ git commit -m "feat: ONNX speaker embedding adapter"
 
 **Interfaces:**
 - Consumes: `Language`, `VoiceProfile.Role` (Task 4).
-- Produces: `object Csv` with `parse(text: String): List<Map<String, String>>`; `enum class RecordingRole { TARGET_CHILD, SIBLING, PARENT, OTHER_HOUSEHOLD, MEDIA, STRANGER, ROOM_TONE }` with `isHouseholdMember: Boolean` and `toProfileRole(): VoiceProfile.Role`; `enum class ContentType { SPONTANEOUS, READ, CALLING, ROOM_TONE }`; `data class Recording(...)`; `data class CallEvent(recordingPath: String, startMs: Long, targetSpeakerId: String)`; `object Manifest` with `readRecordings(path: Path): List<Recording>` and `readEvents(path: Path): List<CallEvent>`. Tasks 15 and 16 consume these.
+- Produces: `object Csv` with `parse(text: String): List<Map<String, String>>`; `enum class RecordingRole { TARGET_CHILD, SIBLING, PARENT, OTHER_HOUSEHOLD, MEDIA, STRANGER, ROOM_TONE }` with `isHouseholdMember: Boolean` and `toProfileRole(): VoiceProfile.Role`; `enum class ContentType { SPONTANEOUS, READ, CALLING, ROOM_TONE }`; `data class Recording(...)`; `data class CallEvent(recordingPath: String, startMs: Long, targetSpeakerId: String)`; `object Manifest` with `readRecordings(path: Path): List<Recording>` and `readEvents(path: Path): List<CallEvent>`. Tasks 16 and 17 consume these.
 
 This is the executable form of spec §9.1's labelling schema. Two files: `recordings.csv` describes every audio file, `events.csv` marks where in a recording the child actually called for the parent.
 
@@ -3672,15 +4352,15 @@ git commit -m "feat: corpus manifest format per spec 9.1"
 
 ---
 
-### Task 15: Metrics — the numbers that decide go/no-go
+### Task 16: Metrics — the numbers that decide go/no-go
 
 **Files:**
 - Create: `harness/src/main/kotlin/app/presence/harness/Metrics.kt`
 - Test: `harness/src/test/kotlin/app/presence/harness/MetricsTest.kt`
 
 **Interfaces:**
-- Consumes: `CallEvent` (Task 14).
-- Produces: `data class Detection(recordingPath: String, timestampMs: Long)`; `enum class Verdict { SHIP, ITERATE, FALL_BACK }`; `data class Outcome(label: String, fireThreshold: Float, falseAlarms: Int, negativeHours: Double, detectedEvents: Int, totalEvents: Int, latenciesMs: List<Long>)` with computed `falseAlarmsPerHour`, `missRate`, `medianLatencyMs`, `verdict`; `object Metrics` with `scoreEvents(detections, events, latencyBudgetMs = 10_000): EventScoring` where `data class EventScoring(detected: Int, total: Int, latenciesMs: List<Long>)`. Task 16 uses all of it.
+- Consumes: `CallEvent` (Task 15).
+- Produces: `data class Detection(recordingPath: String, timestampMs: Long)`; `enum class Verdict { SHIP, ITERATE, FALL_BACK }`; `data class Outcome(label: String, fireThreshold: Float, falseAlarms: Int, negativeHours: Double, detectedEvents: Int, totalEvents: Int, latenciesMs: List<Long>)` with computed `falseAlarmsPerHour`, `missRate`, `medianLatencyMs`, `verdict`; `object Metrics` with `scoreEvents(detections, events, latencyBudgetMs = 10_000): EventScoring` where `data class EventScoring(detected: Int, total: Int, latenciesMs: List<Long>)`. Task 17 uses all of it.
 
 **Encoding §4.3 as code is the point of this task.** The verdict thresholds are: ship at ≤ 1 false alarm per 2 hours *and* ≥ 80% detection; iterate down to 2 per hour *or* ≥ 50% detection; fall back below that. `Outcome` computes its own verdict so no caller can quietly apply a friendlier rule.
 
@@ -3969,7 +4649,7 @@ git commit -m "feat: Phase 0 metrics with spec 4.3 verdict thresholds"
 
 ---
 
-### Task 16: Evaluation runner, report and CLI
+### Task 17: Evaluation runner, report and CLI
 
 **Files:**
 - Modify: `shared/src/commonMain/kotlin/app/presence/engine/DetectionEngine.kt` — add an optional observation listener
@@ -4662,7 +5342,7 @@ The code is the easy half. The measurement is the deliverable, and it needs the 
 
 ## Deliberately not in this plan
 
-Spec §9 lists five things Phase 0 must settle. Three are covered by Task 16's sweep — cross-lingual
+Spec §9 lists five things Phase 0 must settle. Three are covered by Task 17's sweep — cross-lingual
 performance, code-switching, and whether media-playback state suppresses television false alarms
 (the `MEDIA` role gives the last one its measurement). Two are **not**, and are called out here so
 the gap is a decision rather than an oversight:
@@ -4678,7 +5358,7 @@ the gap is a decision rather than an oversight:
   serving as a build-versus-buy baseline (spec §4.1). Worth doing, but it is procurement plus an
   adapter, not a change to this pipeline — and it only matters if our own numbers disappoint.
 
-Also worth knowing while running the sweep: **Task 16 sweeps the fire threshold, not the
+Also worth knowing while running the sweep: **Task 17 sweeps the fire threshold, not the
 accumulation window.** Window length is the other half of the core trade-off — longer is more
 accurate and slower to react (spec §9) — and `AccumulatorConfig.windowMs` is a constructor
 parameter, so exploring it means a second sweep loop over window lengths. Add it if the threshold
