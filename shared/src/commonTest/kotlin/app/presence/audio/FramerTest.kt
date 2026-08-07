@@ -83,4 +83,20 @@ class FramerTest {
     fun `rejects a hop larger than the frame`() {
         assertFailsWith<IllegalArgumentException> { Framer(frameSize = 4, hopSize = 5) }
     }
+
+    @Test
+    fun `overlapping frames survive being pushed in uneven chunks`() {
+        val expected = Framer(frameSize = 4, hopSize = 3).push(ramp(16))
+
+        val framer = Framer(frameSize = 4, hopSize = 3)
+        val actual = mutableListOf<FloatArray>()
+        var offset = 0
+        for (size in listOf(5, 1, 1, 4, 5)) {
+            actual += framer.push(ramp(size, from = offset))
+            offset += size
+        }
+
+        assertEquals(expected.size, actual.size)
+        expected.forEachIndexed { index, frame -> assertContentEquals(frame, actual[index]) }
+    }
 }
