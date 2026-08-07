@@ -13,6 +13,11 @@ import app.presence.engine.Embedding
  *   scoring possible (spec §5); enrolling only the target child is a design error.
  * @param negatives embeddings the parent rejected via the "not them" button. A drifting profile
  *   should decay toward silence, not toward firing on a sibling.
+ *
+ * Treated as immutable once constructed. `init` validates at construction only, so callers must
+ * not retain a mutable alias to any collection passed in — pass a fresh map or list. This is a
+ * contract rather than an enforced guarantee: defensively copying would mean surrendering the
+ * generated `copy()`, which enrollment and the matcher both use.
  */
 data class VoiceProfile(
     val personId: String,
@@ -31,9 +36,9 @@ data class VoiceProfile(
     init {
         require(personId.isNotBlank()) { "personId must not be blank" }
         require(centroids.isNotEmpty()) { "profile '$personId' has no centroids" }
-        val dimensions = centroids.values.map { it.dimension }.distinct()
+        val dimensions = (centroids.values + negatives).map { it.dimension }.distinct()
         require(dimensions.size == 1) {
-            "profile '$personId' has centroids of differing dimensions: $dimensions"
+            "profile '$personId' mixes embedding dimensions: $dimensions"
         }
     }
 

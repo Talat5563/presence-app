@@ -83,4 +83,17 @@ class VoiceProfileTest {
         assertTrue(profile.negatives.isEmpty())
         assertTrue(profile.enrolledSecondsByLanguage.isEmpty())
     }
+
+    @Test
+    fun `rejects a negative example of a different dimension`() {
+        val failure = assertFailsWith<IllegalArgumentException> {
+            VoiceProfile(
+                personId = "maya",
+                role = VoiceProfile.Role.TARGET_CHILD,
+                centroids = mapOf(Language.ENGLISH to embedding(1f, 0f)),
+                negatives = listOf(embedding(0f, 1f, 0f)),
+            )
+        }
+        assertTrue(failure.message!!.contains("maya"))
+    }
 }
