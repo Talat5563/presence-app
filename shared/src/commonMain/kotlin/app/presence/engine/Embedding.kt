@@ -10,7 +10,17 @@ import kotlin.math.sqrt
  * bug where an unnormalized vector yields similarities above 1.0 that then distort the
  * evidence accumulator downstream.
  */
-class Embedding private constructor(val values: FloatArray) {
+class Embedding private constructor(
+    /**
+     * The unit-length components.
+     *
+     * `internal` rather than public: a `FloatArray` is mutable, and one stray write from outside
+     * would silently break the invariant that makes [cosine] a plain dot product. A defensive copy
+     * on every read would be safer still, but [cosine] runs once per profile per observation and
+     * copying the vector each time is a cost this hot path should not pay.
+     */
+    internal val values: FloatArray,
+) {
 
     val dimension: Int get() = values.size
 
@@ -50,12 +60,12 @@ fun cosine(a: Embedding, b: Embedding): Float {
 fun centroidOf(embeddings: List<Embedding>): Embedding {
     require(embeddings.isNotEmpty()) { "cannot build a centroid from zero embeddings" }
     val dimension = embeddings.first().dimension
-    val accumulator = FloatArray(dimension)
+    val accumulator = DoubleArray(dimension)
     for (embedding in embeddings) {
         require(embedding.dimension == dimension) {
             "dimension mismatch in centroid input: expected $dimension, got ${embedding.dimension}"
         }
-        for (i in 0 until dimension) accumulator[i] += embedding.values[i]
+        for (i in 0 until dimension) accumulator[i] += embedding.values[i].toDouble()
     }
-    return Embedding.ofNormalized(accumulator)
+    return Embedding.ofNormalized(FloatArray(dimension) { accumulator[it].toFloat() })
 }

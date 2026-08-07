@@ -115,4 +115,12 @@ class EmbeddingTest {
 
         assertFailsWith<IllegalArgumentException> { centroidOf(listOf(a, b)) }
     }
+
+    @Test
+    fun `centroid of opposing vectors is rejected rather than producing NaN`() {
+        val forward = Embedding.ofNormalized(floatArrayOf(1f, 0f))
+        val backward = Embedding.ofNormalized(floatArrayOf(-1f, 0f))
+
+        assertFailsWith<IllegalArgumentException> { centroidOf(listOf(forward, backward)) }
+    }
 }
