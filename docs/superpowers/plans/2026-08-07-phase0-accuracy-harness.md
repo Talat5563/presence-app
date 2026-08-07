@@ -844,6 +844,19 @@ class VoiceProfileTest {
     }
 
     @Test
+    fun `rejects a negative example of a different dimension`() {
+        val failure = assertFailsWith<IllegalArgumentException> {
+            VoiceProfile(
+                personId = "maya",
+                role = VoiceProfile.Role.TARGET_CHILD,
+                centroids = mapOf(Language.ENGLISH to embedding(1f, 0f)),
+                negatives = listOf(embedding(0f, 1f, 0f)),
+            )
+        }
+        assertTrue(failure.message!!.contains("maya"))
+    }
+
+    @Test
     fun `defaults to no negatives and no recorded durations`() {
         val profile = VoiceProfile(
             personId = "maya",
@@ -900,6 +913,11 @@ import app.presence.engine.Embedding
  *   scoring possible (spec §5); enrolling only the target child is a design error.
  * @param negatives embeddings the parent rejected via the "not them" button. A drifting profile
  *   should decay toward silence, not toward firing on a sibling.
+ *
+ * Treated as immutable once constructed. `init` validates at construction only, so callers must
+ * not retain a mutable alias to any collection passed in — pass a fresh map or list. This is a
+ * contract rather than an enforced guarantee: defensively copying would mean surrendering the
+ * generated `copy()`, which enrollment and the matcher both use.
  */
 data class VoiceProfile(
     val personId: String,
@@ -918,9 +936,11 @@ data class VoiceProfile(
     init {
         require(personId.isNotBlank()) { "personId must not be blank" }
         require(centroids.isNotEmpty()) { "profile '$personId' has no centroids" }
-        val dimensions = centroids.values.map { it.dimension }.distinct()
+        // Negatives are compared against these centroids downstream, so a mismatched one must
+        // fail here rather than inside cosine(), far from where the bad data entered.
+        val dimensions = (centroids.values + negatives).map { it.dimension }.distinct()
         require(dimensions.size == 1) {
-            "profile '$personId' has centroids of differing dimensions: $dimensions"
+            "profile '$personId' mixes embedding dimensions: $dimensions"
         }
     }
 
@@ -931,7 +951,7 @@ data class VoiceProfile(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.domain.VoiceProfileTest"`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2436,7 +2456,7 @@ Expected: PASS, 7 tests.
 - [ ] **Step 6: Run the whole suite**
 
 Run: `./gradlew :shared:jvmTest`
-Expected: PASS, 78 tests across all engine classes.
+Expected: PASS, 81 tests across all engine classes.
 
 - [ ] **Step 7: Commit**
 
@@ -4389,7 +4409,7 @@ object Manifest {
 - [ ] **Step 5: Run the test and verify it passes**
 
 Run: `./gradlew :harness:test --tests "app.presence.harness.ManifestTest"`
-Expected: PASS, 15 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -4777,7 +4797,7 @@ Append to `shared/src/commonTest/kotlin/app/presence/engine/DetectionEngineTest.
 ```
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.DetectionEngineTest"`
-Expected: PASS, 9 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 3: Write the failing evaluation test**
 
