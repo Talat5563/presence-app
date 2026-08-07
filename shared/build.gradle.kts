@@ -17,9 +17,9 @@ kotlin {
     }
 }
 
-// Two suites (see Global Constraints). `test` runs pure-logic tests only; anything needing a
-// real model file is tagged "model" and runs under `integrationTest`, which fails loudly when
-// the model is absent rather than skipping silently.
+// Two suites (see Global Constraints). The default suite runs pure-logic tests only; anything
+// needing a real model file is tagged "model" and runs under `integrationTest`, which fails
+// loudly when the model is absent rather than skipping silently.
 //
 // The exclusion below must skip the `integrationTest` task itself (registered below): applying
 // `excludeTags("model")` via `withType<Test>().configureEach` also configures `integrationTest`
