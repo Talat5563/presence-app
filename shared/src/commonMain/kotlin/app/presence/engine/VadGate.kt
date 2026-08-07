@@ -67,15 +67,8 @@ class VadGate(
                 append(frame)
             }
         } else {
-            if (probability < config.endThreshold) {
-                // Sub-threshold frames count toward the hangover close but must not be written
-                // into the segment: padding the buffer with trailing silence would let hangover
-                // alone push a too-short utterance over minSegmentMs.
-                silentFrames++
-            } else {
-                silentFrames = 0
-                append(frame)
-            }
+            append(frame)
+            silentFrames = if (probability < config.endThreshold) silentFrames + 1 else 0
             val reachedCap = samplesToMillis(currentSampleCount) >= config.maxSegmentMs
             if (silentFrames >= config.hangoverFrames || reachedCap) {
                 completed = close()
@@ -106,9 +99,16 @@ class VadGate(
     }
 
     private fun close(): SpeechSegment? {
-        val merged = FloatArray(currentSampleCount)
+        // The hangover frames that closed this segment are trailing silence — they must not pad
+        // the segment past the minimum-duration floor, and they must not reach the embedder.
+        // Trimming only the tail keeps the samples contiguous, so startSampleIndex + size still
+        // corresponds to the real end of speech in the stream, which Task 9 uses for timestamps.
+        val keptFrames = current.size - silentFrames
+        val kept = current.take(keptFrames)
+        val total = kept.sumOf { it.size }
+        val merged = FloatArray(total)
         var offset = 0
-        for (chunk in current) {
+        for (chunk in kept) {
             chunk.copyInto(merged, offset)
             offset += chunk.size
         }
