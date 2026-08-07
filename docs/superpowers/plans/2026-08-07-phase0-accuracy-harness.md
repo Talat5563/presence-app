@@ -21,7 +21,8 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 - **EER is not a product target.** Report false alarms per hour and miss rate per real event. EER is computed only for comparison with published work (spec §4.1).
 - **Package root is `app.presence`.** Engine code lives in `app.presence.{audio,domain,engine,enrollment}`; harness code in `app.presence.harness`.
 - **Go / no-go thresholds (spec §4.3):** ship at ≤ 1 false alarm per 2 hours with ≥ 80% of real events detected within 10 s; iterate between that and 2 false alarms per hour or 50% detection; fall back below that.
-- **Two test suites, and no test ever skips itself.** `./gradlew test` runs pure-logic tests that use fakes — no models, no network, green on a fresh clone. Tests needing a real model file are annotated `@Tag("model")`, excluded from `test`, and run by `./gradlew integrationTest`, which **fails loudly** if the model is missing. A test that prints "SKIP" and returns still reports as passing, which is worse than no test at all.
+- **Two test suites, and no test ever skips itself.** The default suite runs pure-logic tests that use fakes — no models, no network, green on a fresh clone. Tests needing a real model file are annotated `@Tag("model")`, excluded from the default suite, and run by `./gradlew integrationTest`, which **fails loudly** if the model is missing. A test that prints "SKIP" and returns still reports as passing, which is worse than no test at all.
+- **Task names:** `:shared` is a Kotlin Multiplatform module, so its default test task is **`jvmTest`, not `test`** — a root `./gradlew test` would silently run nothing there. Use `./gradlew check` for everything, or `:shared:jvmTest` / `:harness:test` when targeting one module. `:shared:integrationTest` and `:harness:integrationTest` run the model-tagged tests.
 - **Do not guess tensor names or shapes.** They were verified against the real model files and are recorded below. If a model is ever swapped, re-verify rather than assume.
 
 ## Verified environment and model facts
@@ -202,12 +203,19 @@ kotlin {
     }
 }
 
-// Two suites (see Global Constraints). `test` runs pure-logic tests only; anything needing a
-// real model file is tagged "model" and runs under `integrationTest`, which fails loudly when
-// the model is absent rather than skipping silently.
+// Two suites (see Global Constraints). The default suite runs pure-logic tests only; anything
+// needing a real model file is tagged "model" and runs under `integrationTest`, which fails
+// loudly when the model is absent rather than skipping silently.
+//
+// The exclusion below MUST skip the `integrationTest` task itself. `withType<Test>()` also
+// matches `integrationTest` (it is a Test task too), and JUnit Platform treats a tag that is
+// both included and excluded as excluded — which would silently run zero model tests forever,
+// the exact behaviour the global test contract forbids.
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform {
-        excludeTags("model")
+    if (name != "integrationTest") {
+        useJUnitPlatform {
+            excludeTags("model")
+        }
     }
 }
 
@@ -2902,7 +2910,7 @@ Requires JDK 17 and Gradle 8.11.
 
 ```bash
 ./tools/fetch-models.sh                         # download models into models/ (gitignored)
-./gradlew test                                  # pure-logic tests — no models, no network
+./gradlew check                                 # pure-logic tests — no models, no network
 ./gradlew integrationTest                       # tests that need the real model files
 ./gradlew :harness:run --args="--help"          # evaluation CLI
 ```
@@ -5307,7 +5315,7 @@ Expected: the usage text prints.
 
 - [ ] **Step 10: Run the full suite**
 
-Run: `./gradlew test`
+Run: `./gradlew check`
 Expected: PASS across `:shared` and `:harness`.
 
 - [ ] **Step 11: Commit**
