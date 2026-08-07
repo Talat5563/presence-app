@@ -513,7 +513,7 @@ git commit -m "feat: Framer splits audio streams into stable fixed-size frames"
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `class Embedding` with `values: FloatArray`, `dimension: Int`, and factory `Embedding.ofNormalized(values: FloatArray): Embedding`; top-level `cosine(a: Embedding, b: Embedding): Float` and `centroidOf(embeddings: List<Embedding>): Embedding`. Tasks 4, 5, 6, 8 and 12 all depend on these exact names.
+- Produces: `class Embedding` with `internal values: FloatArray` and public `dimension: Int`, and factory `Embedding.ofNormalized(values: FloatArray): Embedding`; top-level `cosine(a: Embedding, b: Embedding): Float` and `centroidOf(embeddings: List<Embedding>): Embedding`. Tasks 4, 5, 6, 8 and 12 all depend on these exact names.
 
 Design point worth understanding before writing it: `Embedding` can only be constructed normalized. That makes `cosine` a plain dot product and removes an entire class of bug where an unnormalized vector silently produces similarity scores above 1.0 that then poison the accumulator. The constructor is private; the factory is the only door.
 
@@ -628,6 +628,14 @@ class EmbeddingTest {
     }
 
     @Test
+    fun `centroid of opposing vectors is rejected rather than producing NaN`() {
+        val forward = Embedding.ofNormalized(floatArrayOf(1f, 0f))
+        val backward = Embedding.ofNormalized(floatArrayOf(-1f, 0f))
+
+        assertFailsWith<IllegalArgumentException> { centroidOf(listOf(forward, backward)) }
+    }
+
+    @Test
     fun `centroid rejects an empty list`() {
         assertFailsWith<IllegalArgumentException> { centroidOf(emptyList()) }
     }
@@ -664,7 +672,17 @@ import kotlin.math.sqrt
  * bug where an unnormalized vector yields similarities above 1.0 that then distort the
  * evidence accumulator downstream.
  */
-class Embedding private constructor(val values: FloatArray) {
+class Embedding private constructor(
+    /**
+     * The unit-length components.
+     *
+     * `internal` rather than public: a `FloatArray` is mutable, and one stray write from outside
+     * would silently break the invariant that makes [cosine] a plain dot product. A defensive copy
+     * on every read would be safer still, but [cosine] runs once per profile per observation and
+     * copying the vector each time is a cost this hot path should not pay.
+     */
+    internal val values: FloatArray,
+) {
 
     val dimension: Int get() = values.size
 
@@ -704,21 +722,24 @@ fun cosine(a: Embedding, b: Embedding): Float {
 fun centroidOf(embeddings: List<Embedding>): Embedding {
     require(embeddings.isNotEmpty()) { "cannot build a centroid from zero embeddings" }
     val dimension = embeddings.first().dimension
-    val accumulator = FloatArray(dimension)
+    // Accumulate in Double, like ofNormalized and cosine — summing many unit vectors in Float
+    // loses precision that a similarity threshold can feel.
+    val accumulator = DoubleArray(dimension)
     for (embedding in embeddings) {
         require(embedding.dimension == dimension) {
             "dimension mismatch in centroid input: expected $dimension, got ${embedding.dimension}"
         }
-        for (i in 0 until dimension) accumulator[i] += embedding.values[i]
+        for (i in 0 until dimension) accumulator[i] += embedding.values[i].toDouble()
     }
-    return Embedding.ofNormalized(accumulator)
+    // Antipodal inputs sum to ~zero; ofNormalized rejects that rather than returning NaN.
+    return Embedding.ofNormalized(FloatArray(dimension) { accumulator[it].toFloat() })
 }
 ```
 
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.EmbeddingTest"`
-Expected: PASS, 13 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
