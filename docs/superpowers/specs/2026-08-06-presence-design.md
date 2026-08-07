@@ -406,9 +406,11 @@ speech.
 
 Both modes converge on the same `EnrollmentService`; only clip acquisition differs.
 
-**Mode A — guided live setup.** The child repeats a handful of short prompts (~60 seconds total).
+**Mode A — guided live setup.** The child repeats a handful of short prompts, targeting ~60 seconds
+of usable speech **per language** — so a bilingual enrollment is roughly two minutes of usable
+speech in total, since §4.2 makes both languages mandatory unless the household is monolingual.
 The UI shows live waveform feedback and per-clip quality results. Best quality, requires the
-child's cooperation for one minute.
+child's cooperation for a couple of minutes.
 
 **Mode B — import existing recordings.** The parent selects existing videos or voice notes. Audio
 is extracted, VAD-segmented, and the parent confirms which segments are the child. No cooperation
