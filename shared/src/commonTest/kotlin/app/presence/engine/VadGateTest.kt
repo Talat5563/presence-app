@@ -61,6 +61,21 @@ class VadGateTest {
         assertEquals(1, segments.size, "a brief dip must not chop the utterance in two")
     }
 
+    /**
+     * The test that makes the two thresholds load-bearing. This dip is longer than the hangover,
+     * so an implementation with endThreshold == startThreshold would close the segment here and
+     * emit two. Only genuine hysteresis — 0.4 counting as continuation because it clears the 0.35
+     * end threshold though not the 0.5 start threshold — keeps it as one utterance.
+     */
+    @Test
+    fun `a sustained dip between the two thresholds does not split the utterance`() {
+        val script = List(20) { 0.9f } + List(10) { 0.4f } + List(20) { 0.9f } + List(20) { 0.01f }
+
+        val segments = runAll(script)
+
+        assertEquals(1, segments.size, "hysteresis should hold this together as one utterance")
+    }
+
     @Test
     fun `splits two utterances separated by real silence`() {
         val script = List(20) { 0.9f } + List(20) { 0.01f } + List(20) { 0.9f } + List(20) { 0.01f }
