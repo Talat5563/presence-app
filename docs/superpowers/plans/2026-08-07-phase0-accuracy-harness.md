@@ -384,6 +384,27 @@ class FramerTest {
         assertContentEquals(floatArrayOf(4f, 5f, 6f, 7f), frames[2])
     }
 
+    /**
+     * The intersection of the two tests above, and the one that actually matters: an
+     * implementation retaining a fixed `frameSize - hopSize` samples instead of tracking the real
+     * unconsumed offset passes every other test here and still drops samples.
+     */
+    @Test
+    fun `overlapping frames survive being pushed in uneven chunks`() {
+        val expected = Framer(frameSize = 4, hopSize = 3).push(ramp(16))
+
+        val framer = Framer(frameSize = 4, hopSize = 3)
+        val actual = mutableListOf<FloatArray>()
+        var offset = 0
+        for (size in listOf(5, 1, 1, 4, 5)) {
+            actual += framer.push(ramp(size, from = offset))
+            offset += size
+        }
+
+        assertEquals(expected.size, actual.size)
+        expected.forEachIndexed { index, frame -> assertContentEquals(frame, actual[index]) }
+    }
+
     @Test
     fun `emits nothing until a full frame is available`() {
         val framer = Framer(frameSize = 4)
@@ -472,7 +493,7 @@ class Framer(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.FramerTest"`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4735,7 +4756,7 @@ Append to `shared/src/commonTest/kotlin/app/presence/engine/DetectionEngineTest.
 ```
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.DetectionEngineTest"`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 3: Write the failing evaluation test**
 
