@@ -1257,9 +1257,16 @@ class VadGate(
     }
 
     private fun close(): SpeechSegment? {
-        val merged = FloatArray(currentSampleCount)
+        // The hangover frames that closed this segment are trailing silence. They must not pad the
+        // segment past the minimum-duration floor, and they must not reach the embedder. Trim only
+        // the tail: filtering sub-threshold frames as they arrive would splice silence out of the
+        // middle of an utterance too, leaving the samples non-contiguous so that
+        // startSampleIndex + size no longer marks the real end of speech — which is exactly the
+        // arithmetic DetectionEngine uses to timestamp observations.
+        val kept = current.take(current.size - silentFrames)
+        val merged = FloatArray(kept.sumOf { it.size })
         var offset = 0
-        for (chunk in current) {
+        for (chunk in kept) {
             chunk.copyInto(merged, offset)
             offset += chunk.size
         }
