@@ -2302,6 +2302,7 @@ One subtlety worth getting right: a long speech segment is cut into overlapping 
 ```kotlin
 package app.presence.engine
 
+import app.presence.domain.DetectionEvent
 import app.presence.domain.Language
 import app.presence.domain.VoiceProfile
 import kotlin.test.Test
@@ -2579,10 +2580,12 @@ class DetectionEngine(
             windows += Window(offset, samples.copyOfRange(offset, offset + windowSamples))
             offset += hopSamples
         }
-        // Cover the tail with a final window ending at the segment boundary, unless the last
-        // window already reached it.
-        val lastCovered = offset - hopSamples + windowSamples
-        if (lastCovered < samples.size) {
+        // Cover the tail with a final window ending at the segment boundary — but only when the
+        // striding loop genuinely missed a meaningful amount of audio. Without this guard, a
+        // segment a few milliseconds longer than one window emits a second window overlapping the
+        // first by ~99%, and the accumulator sums near-identical audio as independent evidence.
+        val uncovered = samples.size - (offset - hopSamples + windowSamples)
+        if (uncovered >= millisToSamples(config.minEmbedDurationMs)) {
             val start = samples.size - windowSamples
             windows += Window(start, samples.copyOfRange(start, samples.size))
         }
