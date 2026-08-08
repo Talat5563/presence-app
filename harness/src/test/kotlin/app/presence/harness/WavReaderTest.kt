@@ -10,6 +10,7 @@ import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 import kotlin.math.abs
+import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -103,5 +104,32 @@ class WavReaderTest {
         writeWav(path, listOf(List(16_000) { (it % 1000).toShort() }))
 
         assertEquals(16_000, WavReader.read(path).size)
+    }
+
+    @Test
+    fun `rejects a bit depth other than 16, naming the fix`() {
+        val path = tempWav("8bit.wav")
+        val samples = byteArrayOf(0, 64, -64)
+        val format = AudioFormat(16_000f, 8, 1, true, false)
+        AudioSystem.write(
+            AudioInputStream(samples.inputStream(), format, samples.size.toLong()),
+            AudioFileFormat.Type.WAVE,
+            path.toFile(),
+        )
+
+        val failure = assertFailsWith<UnsupportedAudioException> { WavReader.read(path) }
+
+        assertTrue(failure.message!!.contains("8-bit"), failure.message!!)
+        assertTrue(failure.message!!.contains("ffmpeg"), "should give the fix command")
+    }
+
+    @Test
+    fun `reports an unreadable file as unsupported rather than leaking a checked exception`() {
+        val path = tempWav("not-audio.wav")
+        path.writeText("this is not a wav file at all")
+
+        val failure = assertFailsWith<UnsupportedAudioException> { WavReader.read(path) }
+
+        assertTrue(failure.message!!.contains("not-audio.wav"))
     }
 }

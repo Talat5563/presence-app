@@ -1,10 +1,12 @@
 package app.presence.harness
 
 import app.presence.audio.SAMPLE_RATE_HZ
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Path
 import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.UnsupportedAudioFileException
 import kotlin.io.path.exists
 import kotlin.io.path.name
 
@@ -28,8 +30,16 @@ object WavReader {
             throw UnsupportedAudioException("audio file not found: $path")
         }
 
-        AudioSystem.getAudioInputStream(path.toFile()).use { stream ->
-            val format = stream.format
+        val stream = try {
+            AudioSystem.getAudioInputStream(path.toFile())
+        } catch (failure: UnsupportedAudioFileException) {
+            throw UnsupportedAudioException("${path.name}: not a readable audio file (${failure.message})")
+        } catch (failure: IOException) {
+            throw UnsupportedAudioException("${path.name}: could not be read (${failure.message})")
+        }
+
+        stream.use { audio ->
+            val format = audio.format
 
             if (format.sampleRate.toInt() != SAMPLE_RATE_HZ) {
                 throw UnsupportedAudioException(
@@ -47,9 +57,16 @@ object WavReader {
             }
 
             val channels = format.channels
-            val bytes = stream.readAllBytes()
+            val bytes = audio.readAllBytes()
             val order = if (format.isBigEndian) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
             val shorts = ByteBuffer.wrap(bytes).order(order).asShortBuffer()
+
+            if (shorts.limit() % channels != 0) {
+                throw UnsupportedAudioException(
+                    "${path.name}: ${shorts.limit()} samples do not divide evenly into $channels " +
+                        "channels — the file is truncated",
+                )
+            }
 
             val frameCount = shorts.limit() / channels
             val samples = FloatArray(frameCount)
@@ -58,6 +75,8 @@ object WavReader {
                 for (channel in 0 until channels) {
                     sum += shorts.get(frame * channels + channel) / FULL_SCALE
                 }
+                // Dividing by 32_768 already bounds this to [-1, 1]; the clamp is belt-and-braces
+                // against a malformed frame count rather than the thing enforcing the range.
                 samples[frame] = (sum / channels).coerceIn(-1f, 1f)
             }
             return samples
