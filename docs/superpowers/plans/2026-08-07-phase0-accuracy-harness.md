@@ -3887,20 +3887,31 @@ class FbankExtractorTest {
         }
     }
 
+    /**
+     * Mean normalization is per-utterance, so a stationary tone yields bit-identical frames whose
+     * every bin normalizes to exactly zero — its "peak" would be an arbitrary tie on bin 0. This
+     * signal changes pitch halfway through, so early frames sit above the utterance mean in the
+     * low bins and late frames sit above it in the high bins. That is the property that matters,
+     * and it exercises the whole extractor including normalization.
+     *
+     * Measured on this filterbank: 300 Hz peaks at bin 10, 3000 Hz at bin 52 — the same bins the
+     * raw pre-normalization spectra peak at.
+     */
     @Test
-    fun `a higher tone shifts energy into higher mel bins`() {
-        val low = extractor.extract(tone(300.0, 8_000))
-        val high = extractor.extract(tone(3_000.0, 8_000))
+    fun `energy moves to higher mel bins when the pitch rises mid-utterance`() {
+        val lowThenHigh = tone(300.0, 8_000) + tone(3_000.0, 8_000)
 
-        val lowPeak = peakBin(low)
-        val highPeak = peakBin(high)
+        val features = extractor.extract(lowThenHigh)
 
-        assertTrue(lowPeak < highPeak, "300 Hz peaked at bin $lowPeak, 3000 Hz at bin $highPeak")
-    }
+        val early = features[features.size / 4]
+        val late = features[3 * features.size / 4]
+        val earlyPeak = early.indices.maxBy { early[it] }
+        val latePeak = late.indices.maxBy { late[it] }
 
-    private fun peakBin(features: Array<FloatArray>): Int {
-        val middle = features[features.size / 2]
-        return middle.indices.maxBy { middle[it] }
+        assertTrue(
+            earlyPeak < latePeak,
+            "early frame peaked at bin $earlyPeak, late frame at bin $latePeak",
+        )
     }
 }
 ```
