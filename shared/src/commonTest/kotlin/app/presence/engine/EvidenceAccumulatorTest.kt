@@ -2,6 +2,7 @@ package app.presence.engine
 
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -104,5 +105,46 @@ class EvidenceAccumulatorTest {
         kotlin.test.assertFailsWith<IllegalArgumentException> {
             AccumulatorConfig(windowMs = 0)
         }
+    }
+
+    @Test
+    fun `rejects an observation that goes backwards in time`() {
+        val subject = accumulator()
+        subject.accept(Observation(5_000, 1.0f))
+
+        assertFailsWith<IllegalArgumentException> { subject.accept(Observation(4_999, 1.0f)) }
+    }
+
+    @Test
+    fun `an observation exactly one window old still counts`() {
+        val subject = accumulator()
+
+        subject.accept(Observation(0, 4.0f))
+
+        assertClose(6.0f, assertNotNull(subject.accept(Observation(20_000, 2.0f))))
+    }
+
+    @Test
+    fun `an observation one millisecond past the window does not count`() {
+        val subject = accumulator()
+
+        subject.accept(Observation(0, 4.0f))
+
+        assertNull(subject.accept(Observation(20_001, 2.0f)))
+    }
+
+    @Test
+    fun `evidence arriving during cooldown does not carry across the boundary`() {
+        val subject = accumulator()
+        assertNotNull(subject.accept(Observation(0, 7.0f)))
+
+        // Suppressed, and deliberately not accumulated.
+        assertNull(subject.accept(Observation(30_000, 3.0f)))
+        assertNull(subject.accept(Observation(50_000, 3.0f)))
+
+        // Cooldown has exactly elapsed, so this is allowed to fire — but on its own evidence,
+        // which is below the threshold. Had the suppressed observations accumulated, this
+        // would have fired instead.
+        assertNull(subject.accept(Observation(60_000, 3.0f)))
     }
 }

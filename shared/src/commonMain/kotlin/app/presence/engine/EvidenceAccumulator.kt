@@ -38,18 +38,31 @@ class EvidenceAccumulator(
 ) {
     private val window = ArrayDeque<Observation>()
     private var lastFiredAtMs: Long? = null
+    private var lastTimestampMs: Long? = null
 
     /** Returns the accumulated evidence if this observation triggers a detection, else null. */
     fun accept(observation: Observation): Float? {
-        window.addLast(observation)
+        val previous = lastTimestampMs
+        require(previous == null || observation.timestampMs >= previous) {
+            "observations must arrive in non-decreasing timestamp order: " +
+                "got ${observation.timestampMs} after $previous"
+        }
+        lastTimestampMs = observation.timestampMs
 
+        val firedAt = lastFiredAtMs
+        if (firedAt != null && observation.timestampMs - firedAt < config.cooldownMs) {
+            // Deliberately does not accumulate. Evidence gathered while suppressed would
+            // otherwise fire the instant the cooldown lapses, with no new speech since — which
+            // makes the cooldown a delay rather than a requirement for fresh reason to interrupt.
+            return null
+        }
+
+        window.addLast(observation)
+        // Strict `<`: an observation exactly windowMs old still counts.
         val cutoff = observation.timestampMs - config.windowMs
         while (window.isNotEmpty() && window.first().timestampMs < cutoff) {
             window.removeFirst()
         }
-
-        val firedAt = lastFiredAtMs
-        if (firedAt != null && observation.timestampMs - firedAt < config.cooldownMs) return null
 
         var total = 0f
         for (entry in window) total += entry.logLikelihoodRatio
@@ -64,5 +77,6 @@ class EvidenceAccumulator(
     fun reset() {
         window.clear()
         lastFiredAtMs = null
+        lastTimestampMs = null
     }
 }
