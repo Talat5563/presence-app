@@ -32,6 +32,20 @@ data class MatcherConfig(
     val fallbackCohortMean: Float = 0.15f,
     val fallbackCohortStdDev: Float = 0.10f,
     val maxAbsLlr: Float = 4.0f,
+    /**
+     * Absolute similarity the target must reach before any positive evidence is allowed.
+     *
+     * The z-score alone cannot do this job: a winning target necessarily sits far above the
+     * cohort mean in standard-deviation terms, so the z floor never binds for a normal-sized
+     * household. A stranger who resembles the target more than the family does would otherwise
+     * pass. Calibrate this against real embeddings in Phase 0 — it is the single most important
+     * open-set knob.
+     */
+    val minTargetSimilarity: Float = 0.35f,
+    /** Floor on the cohort standard deviation, in cosine units — keeps z finite and meaningful. */
+    val minCohortStdDev: Float = 0.02f,
+    /** How close a negative example may come to the target before it vetoes the match. */
+    val negativeVetoMargin: Float = 0.05f,
 ) {
     init {
         require(softmaxTemperature > 0f) { "softmaxTemperature must be positive" }
@@ -69,14 +83,17 @@ class HouseholdMatcher(
         val z = cohortZScore(targetSimilarity, cohortSimilarities)
         var llr = closedSetLogLikelihoodRatio(targetSimilarity, cohortSimilarities)
 
-        // Open-set gate. A stranger or the television resembles nobody in particular, but the
+        // Open-set gates. A stranger or the television resembles nobody in particular, but the
         // posterior alone would still crown a winner among the enrolled.
         if (z < config.minCohortZ) llr = minOf(llr, 0f)
+        if (targetSimilarity < config.minTargetSimilarity) llr = minOf(llr, 0f)
 
         // "Not them" vetoes. A drifting profile should decay toward silence, never toward
         // firing on a sibling.
         val closestNegative = target.negatives.maxOfOrNull { cosine(observation, it) }
-        if (closestNegative != null && closestNegative >= targetSimilarity) llr = minOf(llr, 0f)
+        if (closestNegative != null && closestNegative >= targetSimilarity - config.negativeVetoMargin) {
+            llr = minOf(llr, 0f)
+        }
 
         return MatchScore(
             targetSimilarity = targetSimilarity,
@@ -102,7 +119,7 @@ class HouseholdMatcher(
         }
         val stdDev = sqrt(sumSquaredDeviation / cohortSimilarities.size)
             .toFloat()
-            .coerceAtLeast(1e-4f)
+            .coerceAtLeast(config.minCohortStdDev)
         return (targetSimilarity - mean) / stdDev
     }
 

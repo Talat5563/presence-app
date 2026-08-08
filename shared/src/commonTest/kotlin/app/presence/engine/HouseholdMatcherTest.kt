@@ -133,6 +133,35 @@ class HouseholdMatcherTest {
         assertTrue(abs(0.8f - score.bestNonTargetSimilarity) < 1e-5f, "got ${score.bestNonTargetSimilarity}")
     }
 
+    /**
+     * The test the z gate cannot satisfy. A winning target always sits far above the cohort mean
+     * in standard-deviation terms, so only the absolute floor can reject a voice that beats the
+     * household without resembling anyone much.
+     */
+    @Test
+    fun `a weak absolute match produces no positive evidence even when it beats the cohort`() {
+        val target = profile("maya", VoiceProfile.Role.TARGET_CHILD, Language.ENGLISH to floatArrayOf(1f, 0f, 0f, 0f))
+        val parent = profile("parent", VoiceProfile.Role.PARENT, Language.ENGLISH to floatArrayOf(0f, 1f, 0f, 0f))
+        val sibling = profile("sibling", VoiceProfile.Role.SIBLING, Language.ENGLISH to floatArrayOf(0f, 0f, 1f, 0f))
+        // Similarity 0.30 to the target, 0.05 to each cohort member, the rest matching nobody.
+        val stranger = observation(0.30f, 0.05f, 0.05f, 0.9513f)
+
+        val score = HouseholdMatcher(target, listOf(parent, sibling)).score(stranger)
+
+        assertTrue(score.targetSimilarity > score.bestNonTargetSimilarity, "target should nominally win")
+        assertTrue(score.cohortZ >= 0.5f, "the z gate does not bind here — that is the point")
+        assertEquals(0f, score.logLikelihoodRatio, "the absolute floor must suppress this")
+    }
+
+    @Test
+    fun `a negative example close to the target also vetoes`() {
+        val nearMiss = maya.copy(negatives = listOf(observation(0.97f, 0.2431f, 0f)))
+
+        val score = matcher(target = nearMiss).score(observation(1f, 0f, 0f))
+
+        assertEquals(0f, score.logLikelihoodRatio)
+    }
+
     @Test
     fun `an empty cohort is rejected because household enrollment is required`() {
         val failure = assertFailsWith<IllegalArgumentException> {
