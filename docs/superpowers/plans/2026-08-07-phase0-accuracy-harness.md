@@ -2104,6 +2104,51 @@ class EvidenceAccumulatorTest {
     }
 
     @Test
+    fun `rejects an observation that goes backwards in time`() {
+        val subject = accumulator()
+        subject.accept(Observation(5_000, 1.0f))
+
+        assertFailsWith<IllegalArgumentException> { subject.accept(Observation(4_999, 1.0f)) }
+    }
+
+    @Test
+    fun `an observation exactly one window old still counts`() {
+        val subject = accumulator()
+
+        subject.accept(Observation(0, 4.0f))
+
+        assertClose(6.0f, assertNotNull(subject.accept(Observation(20_000, 2.0f))))
+    }
+
+    @Test
+    fun `an observation one millisecond past the window does not count`() {
+        val subject = accumulator()
+
+        subject.accept(Observation(0, 4.0f))
+
+        assertNull(subject.accept(Observation(20_001, 2.0f)))
+    }
+
+    /**
+     * Pins the deliberate choice not to accumulate while suppressed. Had the two in-cooldown
+     * observations counted, the third would have fired on evidence gathered while the accumulator
+     * was not allowed to act — turning the cooldown into a delay rather than a requirement for
+     * fresh reason to interrupt.
+     */
+    @Test
+    fun `evidence arriving during cooldown does not carry across the boundary`() {
+        val subject = accumulator()
+        assertNotNull(subject.accept(Observation(0, 7.0f)))
+
+        assertNull(subject.accept(Observation(30_000, 3.0f)))
+        assertNull(subject.accept(Observation(50_000, 3.0f)))
+
+        // Cooldown has exactly elapsed, so this is allowed to fire — but on its own evidence,
+        // which is below the threshold.
+        assertNull(subject.accept(Observation(60_000, 3.0f)))
+    }
+
+    @Test
     fun `rejects a non-positive window`() {
         kotlin.test.assertFailsWith<IllegalArgumentException> {
             AccumulatorConfig(windowMs = 0)
@@ -2162,18 +2207,31 @@ class EvidenceAccumulator(
 ) {
     private val window = ArrayDeque<Observation>()
     private var lastFiredAtMs: Long? = null
+    private var lastTimestampMs: Long? = null
 
     /** Returns the accumulated evidence if this observation triggers a detection, else null. */
     fun accept(observation: Observation): Float? {
-        window.addLast(observation)
+        val previous = lastTimestampMs
+        require(previous == null || observation.timestampMs >= previous) {
+            "observations must arrive in non-decreasing timestamp order: " +
+                "got ${observation.timestampMs} after $previous"
+        }
+        lastTimestampMs = observation.timestampMs
 
+        val firedAt = lastFiredAtMs
+        if (firedAt != null && observation.timestampMs - firedAt < config.cooldownMs) {
+            // Deliberately does not accumulate. Evidence gathered while suppressed would
+            // otherwise fire the instant the cooldown lapses, with no new speech since — which
+            // makes the cooldown a delay rather than a requirement for fresh reason to interrupt.
+            return null
+        }
+
+        window.addLast(observation)
+        // Strict `<`: an observation exactly windowMs old still counts.
         val cutoff = observation.timestampMs - config.windowMs
         while (window.isNotEmpty() && window.first().timestampMs < cutoff) {
             window.removeFirst()
         }
-
-        val firedAt = lastFiredAtMs
-        if (firedAt != null && observation.timestampMs - firedAt < config.cooldownMs) return null
 
         var total = 0f
         for (entry in window) total += entry.logLikelihoodRatio
@@ -2184,10 +2242,11 @@ class EvidenceAccumulator(
         return total
     }
 
-    /** Clears accumulated evidence and any active cooldown. */
+    /** Clears accumulated evidence, any active cooldown, and the stream position. */
     fun reset() {
         window.clear()
         lastFiredAtMs = null
+        lastTimestampMs = null
     }
 }
 ```
@@ -2195,7 +2254,7 @@ class EvidenceAccumulator(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.EvidenceAccumulatorTest"`
-Expected: PASS, 10 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
