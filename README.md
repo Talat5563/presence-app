@@ -38,7 +38,8 @@ top. Spec §4.1 lays out that accuracy ladder with sources, and §9 defines expl
 | `docs/superpowers/plans/2026-08-07-phase0-accuracy-harness.md` | The Phase 0 implementation plan, task by task |
 | `docs/superpowers/plans/2026-08-07-phase0-execution-notes.md` | **Read before running an evaluation** — measured model behaviour, decisions taken during implementation, and known limitations |
 | `docs/superpowers/plans/2026-08-08-roadmap.md` | What happens after Phase 0 — phase sequence, gates, and the decisions that block them |
-| `docs/design/UI_DESIGN_PROMPT.md` | A self-contained, ready-to-paste prompt for designing the complete UI. Hand it to a fresh Claude session |
+| `docs/design/` | The UI design handoff — tokens, bilingual strings, 31 screen specs, components, mockups |
+| `docs/design/INTEGRATION_GAPS.md` | **Read before planning the Android app** — where the design and the engine currently disagree |
 | `shared/` | Kotlin Multiplatform detection engine — framing, VAD gating, embeddings, household scoring, evidence accumulation |
 | `harness/` | JVM-only evaluation harness that drives the engine over a corpus |
 
