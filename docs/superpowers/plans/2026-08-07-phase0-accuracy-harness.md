@@ -4317,7 +4317,12 @@ class OnnxSpeakerEmbedder(
 ) : SpeakerEmbedder, AutoCloseable {
 
     private companion object {
-        /** Below this the embedding is dominated by noise (spec §4.1). */
+        /**
+         * Below this the embedding is dominated by noise.
+         *
+         * Independent of `DetectionEngine.minEmbedDurationMs` (800 ms), which is stricter. This is
+         * the last line of defence for a caller that bypasses the engine — enrollment, for one.
+         */
         const val MIN_DURATION_MS = 400L
     }
 
