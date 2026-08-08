@@ -59,6 +59,14 @@ class ManifestTest {
         assertFailsWith<IllegalArgumentException> { Csv.parse("") }
     }
 
+    @Test
+    fun `rejects duplicate header columns rather than silently losing one`() {
+        val failure = assertFailsWith<IllegalArgumentException> { Csv.parse("a,b,a\n1,2,3\n") }
+
+        assertTrue(failure.message!!.contains("duplicate"), failure.message!!)
+        assertTrue(failure.message!!.contains("a"))
+    }
+
     // --- Recordings ---
 
     @Test
@@ -148,6 +156,29 @@ class ManifestTest {
         assertTrue(failure.message!!.contains("speaker_id"))
     }
 
+    @Test
+    fun `rejects a manifest with a header but no rows`() {
+        val file = tempFile("recordings.csv", "$recordingsHeader\n")
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("no data rows"), failure.message!!)
+    }
+
+    @Test
+    fun `a malformed number names the file and line`() {
+        val file = tempFile(
+            "recordings.csv",
+            "$recordingsHeader\n" +
+                "a.wav,h1,maya,target_child,hebrew,false,spontaneous,abc,table,quiet,kitchen,2026-08-01\n",
+        )
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("recordings.csv"), failure.message!!)
+        assertTrue(failure.message!!.contains("line 2"), failure.message!!)
+    }
+
     // --- Events ---
 
     @Test
@@ -171,6 +202,13 @@ class ManifestTest {
             "events.csv",
             "recording_path,start_ms,target_speaker_id\na.wav,-1,maya\n",
         )
+
+        assertFailsWith<IllegalArgumentException> { Manifest.readEvents(file) }
+    }
+
+    @Test
+    fun `rejects an event with a blank speaker id`() {
+        val file = tempFile("events.csv", "recording_path,start_ms,target_speaker_id\na.wav,100,\n")
 
         assertFailsWith<IllegalArgumentException> { Manifest.readEvents(file) }
     }

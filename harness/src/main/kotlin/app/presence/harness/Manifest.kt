@@ -57,7 +57,11 @@ data class CallEvent(
     val startMs: Long,
     val targetSpeakerId: String,
 ) {
-    init { require(startMs >= 0) { "event start must not be negative, was $startMs" } }
+    init {
+        require(recordingPath.isNotBlank()) { "recordingPath must not be blank" }
+        require(targetSpeakerId.isNotBlank()) { "targetSpeakerId must not be blank" }
+        require(startMs >= 0) { "event start must not be negative, was $startMs" }
+    }
 }
 
 object Manifest {
@@ -70,38 +74,44 @@ object Manifest {
     private val REQUIRED_EVENT_COLUMNS = listOf("recording_path", "start_ms", "target_speaker_id")
 
     fun readRecordings(path: Path): List<Recording> {
-        val rows = Csv.parse(path.readText())
-        requireColumns(rows.first().keys, REQUIRED_RECORDING_COLUMNS, path)
+        val rows = Csv.parseWithLineNumbers(path.readText())
+        require(rows.isNotEmpty()) { "$path has a header but no data rows" }
+        requireColumns(rows.first().second.keys, REQUIRED_RECORDING_COLUMNS, path)
 
-        return rows.map { row ->
-            Recording(
-                path = row.getValue("path"),
-                householdId = row.getValue("household_id"),
-                speakerId = row.getValue("speaker_id"),
-                role = parseEnum(row.getValue("role"), RecordingRole.entries, "role"),
-                language = row.getValue("language").ifBlank { null }
-                    ?.let { parseEnum(it, Language.entries, "language") },
-                codeSwitched = row.getValue("code_switched").equals("true", ignoreCase = true),
-                contentType = parseEnum(row.getValue("content_type"), ContentType.entries, "content_type"),
-                distanceMeters = row.getValue("distance_m").ifBlank { null }?.toDouble(),
-                placement = row.getValue("placement"),
-                background = row.getValue("background"),
-                room = row.getValue("room"),
-                date = row.getValue("date"),
-            )
+        return rows.map { (lineNumber, row) ->
+            withRowContext(path, lineNumber) {
+                Recording(
+                    path = row.getValue("path"),
+                    householdId = row.getValue("household_id"),
+                    speakerId = row.getValue("speaker_id"),
+                    role = parseEnum(row.getValue("role"), RecordingRole.entries, "role"),
+                    language = row.getValue("language").ifBlank { null }
+                        ?.let { parseEnum(it, Language.entries, "language") },
+                    codeSwitched = row.getValue("code_switched").equals("true", ignoreCase = true),
+                    contentType = parseEnum(row.getValue("content_type"), ContentType.entries, "content_type"),
+                    distanceMeters = row.getValue("distance_m").ifBlank { null }?.toDouble(),
+                    placement = row.getValue("placement"),
+                    background = row.getValue("background"),
+                    room = row.getValue("room"),
+                    date = row.getValue("date"),
+                )
+            }
         }
     }
 
     fun readEvents(path: Path): List<CallEvent> {
-        val rows = Csv.parse(path.readText())
-        requireColumns(rows.first().keys, REQUIRED_EVENT_COLUMNS, path)
+        val rows = Csv.parseWithLineNumbers(path.readText())
+        require(rows.isNotEmpty()) { "$path has a header but no data rows" }
+        requireColumns(rows.first().second.keys, REQUIRED_EVENT_COLUMNS, path)
 
-        return rows.map { row ->
-            CallEvent(
-                recordingPath = row.getValue("recording_path"),
-                startMs = row.getValue("start_ms").toLong(),
-                targetSpeakerId = row.getValue("target_speaker_id"),
-            )
+        return rows.map { (lineNumber, row) ->
+            withRowContext(path, lineNumber) {
+                CallEvent(
+                    recordingPath = row.getValue("recording_path"),
+                    startMs = row.getValue("start_ms").toLong(),
+                    targetSpeakerId = row.getValue("target_speaker_id"),
+                )
+            }
         }
     }
 
@@ -109,6 +119,17 @@ object Manifest {
         val missing = required - present
         require(missing.isEmpty()) { "$path is missing required columns: ${missing.joinToString()}" }
     }
+
+    /** Adds file and line context to any validation failure, so a bad row is findable. */
+    private inline fun <T> withRowContext(path: Path, lineNumber: Int, build: () -> T): T =
+        try {
+            build()
+        } catch (failure: IllegalArgumentException) {
+            throw IllegalArgumentException(
+                "${path.fileName}, line $lineNumber: ${failure.message}",
+                failure,
+            )
+        }
 
     private fun <T : Enum<T>> parseEnum(raw: String, values: List<T>, column: String): T =
         values.firstOrNull { it.name.equals(raw.replace('-', '_'), ignoreCase = true) }

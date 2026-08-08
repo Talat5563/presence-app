@@ -9,14 +9,30 @@ package app.presence.harness
  */
 object Csv {
 
-    fun parse(text: String): List<Map<String, String>> {
+    fun parse(text: String): List<Map<String, String>> =
+        parseWithLineNumbers(text).map { it.second }
+
+    /**
+     * Same as [parse], but pairs each row with its 1-based line number in the source text, so a
+     * caller can name the line a human would find in their editor.
+     */
+    fun parseWithLineNumbers(text: String): List<Pair<Int, Map<String, String>>> {
         val lines = text.lineSequence()
             .withIndex()
             .filter { (_, line) -> line.isNotBlank() }
             .toList()
         require(lines.isNotEmpty()) { "CSV is empty: expected a header row" }
 
-        val header = splitRow(lines.first().value, lineNumber = lines.first().index + 1)
+        val headerLineNumber = lines.first().index + 1
+        val header = splitRow(lines.first().value, headerLineNumber)
+
+        // Duplicate names would make zip-to-map keep only the last value, losing a column with no
+        // error at all — the exact silent mis-parse this reader exists to prevent.
+        val duplicates = header.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        require(duplicates.isEmpty()) {
+            "line $headerLineNumber: duplicate column name(s) ${duplicates.joinToString()} — " +
+                "each column must be unique or data is silently lost"
+        }
 
         return lines.drop(1).map { (index, line) ->
             val lineNumber = index + 1
@@ -24,7 +40,7 @@ object Csv {
             require(fields.size == header.size) {
                 "line $lineNumber has ${fields.size} fields but the header has ${header.size}: $line"
             }
-            header.zip(fields).toMap()
+            lineNumber to header.zip(fields).toMap()
         }
     }
 
