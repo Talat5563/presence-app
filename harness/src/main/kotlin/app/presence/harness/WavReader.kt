@@ -44,47 +44,46 @@ object WavReader {
     }
 
     private fun decode(path: Path, audio: AudioInputStream): FloatArray {
-            val format = audio.format
+        val format = audio.format
 
-            if (format.sampleRate.toInt() != SAMPLE_RATE_HZ) {
-                throw UnsupportedAudioException(
-                    "${path.name}: sample rate is ${format.sampleRate.toInt()} Hz, " +
-                        "expected $SAMPLE_RATE_HZ Hz. Convert it with:\n" +
-                        "  ffmpeg -i ${path.name} -ar $SAMPLE_RATE_HZ -ac 1 -c:a pcm_s16le converted.wav",
-                )
-            }
-            if (format.sampleSizeInBits != BITS_PER_SAMPLE) {
-                throw UnsupportedAudioException(
-                    "${path.name}: ${format.sampleSizeInBits}-bit samples, expected $BITS_PER_SAMPLE-bit PCM. " +
-                        "Convert it with:\n" +
-                        "  ffmpeg -i ${path.name} -ar $SAMPLE_RATE_HZ -ac 1 -c:a pcm_s16le converted.wav",
-                )
-            }
-
-            val channels = format.channels
-            val bytes = audio.readAllBytes()
-            val order = if (format.isBigEndian) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
-            val shorts = ByteBuffer.wrap(bytes).order(order).asShortBuffer()
-
-            if (shorts.limit() % channels != 0) {
-                throw UnsupportedAudioException(
-                    "${path.name}: ${shorts.limit()} samples do not divide evenly into $channels " +
-                        "channels — the file is truncated",
-                )
-            }
-
-            val frameCount = shorts.limit() / channels
-            val samples = FloatArray(frameCount)
-            for (frame in 0 until frameCount) {
-                var sum = 0f
-                for (channel in 0 until channels) {
-                    sum += shorts.get(frame * channels + channel) / FULL_SCALE
-                }
-                // Dividing by 32_768 already bounds this to [-1, 1]; the clamp is belt-and-braces
-                // against a malformed frame count rather than the thing enforcing the range.
-                samples[frame] = (sum / channels).coerceIn(-1f, 1f)
-            }
-            return samples
+        if (format.sampleRate.toInt() != SAMPLE_RATE_HZ) {
+            throw UnsupportedAudioException(
+                "${path.name}: sample rate is ${format.sampleRate.toInt()} Hz, " +
+                    "expected $SAMPLE_RATE_HZ Hz. Convert it with:\n" +
+                    "  ffmpeg -i ${path.name} -ar $SAMPLE_RATE_HZ -ac 1 -c:a pcm_s16le converted.wav",
+            )
         }
+        if (format.sampleSizeInBits != BITS_PER_SAMPLE) {
+            throw UnsupportedAudioException(
+                "${path.name}: ${format.sampleSizeInBits}-bit samples, expected $BITS_PER_SAMPLE-bit PCM. " +
+                    "Convert it with:\n" +
+                    "  ffmpeg -i ${path.name} -ar $SAMPLE_RATE_HZ -ac 1 -c:a pcm_s16le converted.wav",
+            )
+        }
+
+        val channels = format.channels
+        val bytes = audio.readAllBytes()
+        val order = if (format.isBigEndian) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
+        val shorts = ByteBuffer.wrap(bytes).order(order).asShortBuffer()
+
+        if (shorts.limit() % channels != 0) {
+            throw UnsupportedAudioException(
+                "${path.name}: ${shorts.limit()} samples do not divide evenly into $channels " +
+                    "channels — the file is truncated",
+            )
+        }
+
+        val frameCount = shorts.limit() / channels
+        val samples = FloatArray(frameCount)
+        for (frame in 0 until frameCount) {
+            var sum = 0f
+            for (channel in 0 until channels) {
+                sum += shorts.get(frame * channels + channel) / FULL_SCALE
+            }
+            // Dividing by 32_768 already bounds this to [-1, 1]; the clamp is belt-and-braces
+            // against a malformed frame count rather than the thing enforcing the range.
+            samples[frame] = (sum / channels).coerceIn(-1f, 1f)
+        }
+        return samples
     }
 }
