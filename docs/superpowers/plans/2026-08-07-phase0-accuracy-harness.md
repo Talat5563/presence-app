@@ -739,7 +739,7 @@ fun centroidOf(embeddings: List<Embedding>): Embedding {
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.EmbeddingTest"`
-Expected: PASS, 18 tests.
+Expected: PASS, 22 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4846,7 +4846,7 @@ object Manifest {
 - [ ] **Step 5: Run the test and verify it passes**
 
 Run: `./gradlew :harness:test --tests "app.presence.harness.ManifestTest"`
-Expected: PASS, 18 tests.
+Expected: PASS, 22 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -4914,6 +4914,21 @@ class MetricsTest {
 
         assertEquals(0, scoring.detected)
         assertTrue(scoring.latenciesMs.isEmpty())
+    }
+
+    @Test
+    fun `a detection exactly at the latency budget counts`() {
+        val scoring = Metrics.scoreEvents(listOf(detection(13_000)), listOf(event(3_000)))
+
+        assertEquals(1, scoring.detected)
+        assertEquals(listOf(10_000L), scoring.latenciesMs)
+    }
+
+    @Test
+    fun `a detection one millisecond past the budget does not count`() {
+        val scoring = Metrics.scoreEvents(listOf(detection(13_001)), listOf(event(3_000)))
+
+        assertEquals(0, scoring.detected)
     }
 
     @Test
@@ -5024,6 +5039,24 @@ class MetricsTest {
     }
 
     @Test
+    fun `iterates at exactly two false alarms per hour with exactly half detected`() {
+        val result = outcome(falseAlarms = 2, negativeHours = 1.0, detected = 5, total = 10)
+
+        assertEquals(2.0, result.falseAlarmsPerHour)
+        assertEquals(0.5, result.detectionRate)
+        assertEquals(Verdict.ITERATE, result.verdict, "both bounds are inclusive")
+    }
+
+    @Test
+    fun `falls back just past either iterate bound`() {
+        val tooManyAlarms = outcome(falseAlarms = 21, negativeHours = 10.0, detected = 10, total = 10)
+        assertEquals(Verdict.FALL_BACK, tooManyAlarms.verdict, "2.1 per hour is past the bound")
+
+        val tooFewDetected = outcome(falseAlarms = 0, negativeHours = 10.0, detected = 49, total = 100)
+        assertEquals(Verdict.FALL_BACK, tooFewDetected.verdict, "49% is past the bound")
+    }
+
+    @Test
     fun `falls back when detection is below fifty percent`() {
         val result = outcome(falseAlarms = 0, negativeHours = 2.0, detected = 4, total = 10)
 
@@ -5073,12 +5106,23 @@ data class Outcome(
     val totalEvents: Int,
     val latenciesMs: List<Long>,
 ) {
+    /** Detections fired in audio containing no target speech, per hour. Zero if there is none. */
     val falseAlarmsPerHour: Double
         get() = if (negativeHours <= 0.0) 0.0 else falseAlarms / negativeHours
 
+    /**
+     * Fraction of labelled events that went undetected. Zero for a corpus with no events, since
+     * nothing was there to miss.
+     *
+     * Deliberately NOT `1 - detectionRate` in that case: [detectionRate] returns zero for an empty
+     * corpus as a safety default, so a misconfigured or empty run falls back rather than reporting
+     * a perfect score. The two are inconsistent only when there are no events at all, and that
+     * asymmetry is the point.
+     */
     val missRate: Double
         get() = if (totalEvents == 0) 0.0 else (totalEvents - detectedEvents).toDouble() / totalEvents
 
+    /** Fraction of labelled events detected. Zero for an empty corpus, so the verdict falls back. */
     val detectionRate: Double
         get() = if (totalEvents == 0) 0.0 else detectedEvents.toDouble() / totalEvents
 
@@ -5144,7 +5188,7 @@ object Metrics {
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :harness:test --tests "app.presence.harness.MetricsTest"`
-Expected: PASS, 18 tests.
+Expected: PASS, 22 tests.
 
 - [ ] **Step 5: Commit**
 
