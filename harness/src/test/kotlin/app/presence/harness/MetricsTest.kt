@@ -37,6 +37,21 @@ class MetricsTest {
     }
 
     @Test
+    fun `a detection exactly at the latency budget counts`() {
+        val scoring = Metrics.scoreEvents(listOf(detection(13_000)), listOf(event(3_000)))
+
+        assertEquals(1, scoring.detected)
+        assertEquals(listOf(10_000L), scoring.latenciesMs)
+    }
+
+    @Test
+    fun `a detection one millisecond past the budget does not count`() {
+        val scoring = Metrics.scoreEvents(listOf(detection(13_001)), listOf(event(3_000)))
+
+        assertEquals(0, scoring.detected)
+    }
+
+    @Test
     fun `a detection before the event does not count`() {
         assertEquals(0, Metrics.scoreEvents(listOf(detection(1_000)), listOf(event(3_000))).detected)
     }
@@ -148,5 +163,23 @@ class MetricsTest {
         val result = outcome(falseAlarms = 0, negativeHours = 2.0, detected = 4, total = 10)
 
         assertEquals(Verdict.FALL_BACK, result.verdict)
+    }
+
+    @Test
+    fun `iterates at exactly two false alarms per hour with exactly half detected`() {
+        val result = outcome(falseAlarms = 2, negativeHours = 1.0, detected = 5, total = 10)
+
+        assertEquals(2.0, result.falseAlarmsPerHour)
+        assertEquals(0.5, result.detectionRate)
+        assertEquals(Verdict.ITERATE, result.verdict, "both bounds are inclusive")
+    }
+
+    @Test
+    fun `falls back just past either iterate bound`() {
+        val tooManyAlarms = outcome(falseAlarms = 21, negativeHours = 10.0, detected = 10, total = 10)
+        assertEquals(Verdict.FALL_BACK, tooManyAlarms.verdict, "2.1 per hour is past the bound")
+
+        val tooFewDetected = outcome(falseAlarms = 0, negativeHours = 10.0, detected = 49, total = 100)
+        assertEquals(Verdict.FALL_BACK, tooFewDetected.verdict, "49% is past the bound")
     }
 }

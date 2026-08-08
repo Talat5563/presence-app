@@ -29,12 +29,27 @@ data class Outcome(
     val totalEvents: Int,
     val latenciesMs: List<Long>,
 ) {
+    /**
+     * Hours of audio containing no target speech had a detection fired in them, per hour.
+     *
+     * Zero when there is no negative audio at all — there is no rate to report.
+     */
     val falseAlarmsPerHour: Double
         get() = if (negativeHours <= 0.0) 0.0 else falseAlarms / negativeHours
 
+    /**
+     * Fraction of labelled events that went undetected. Zero for a corpus with no events, since
+     * nothing was there to miss.
+     *
+     * Deliberately NOT `1 - detectionRate` in that case: [detectionRate] returns zero for an empty
+     * corpus as a safety default, so a misconfigured or empty run falls back rather than reporting
+     * a perfect score. The two are inconsistent only when there are no events at all, and that
+     * asymmetry is the point.
+     */
     val missRate: Double
         get() = if (totalEvents == 0) 0.0 else (totalEvents - detectedEvents).toDouble() / totalEvents
 
+    /** Fraction of labelled events detected. Zero for an empty corpus, so the verdict falls back. */
     val detectionRate: Double
         get() = if (totalEvents == 0) 0.0 else detectedEvents.toDouble() / totalEvents
 
