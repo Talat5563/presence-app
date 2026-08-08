@@ -2551,6 +2551,10 @@ class DetectionEngine(
             val score = matcher.score(embedder.embed(window.samples))
             val timestampMs = toMillis(segment.startSampleIndex + window.offsetSamples + window.samples.size)
             val evidence = accumulator.accept(Observation(timestampMs, score.logLikelihoodRatio))
+            // Only the first fire in a segment is returned, since accept() yields at most one
+            // event. Unreachable under the default 60 s cooldown, which far exceeds any segment,
+            // but a caller configuring a cooldown shorter than maxSegmentMs would have a second
+            // within-segment detection coalesced into the first.
             if (evidence != null && event == null) {
                 event = DetectionEvent(
                     personId = targetPersonId,
@@ -2581,11 +2585,17 @@ class DetectionEngine(
             offset += hopSamples
         }
         // Cover the tail with a final window ending at the segment boundary — but only when the
-        // striding loop genuinely missed a meaningful amount of audio. Without this guard, a
-        // segment a few milliseconds longer than one window emits a second window overlapping the
-        // first by ~99%, and the accumulator sums near-identical audio as independent evidence.
+        // striding loop missed at least one hop of audio. Without a guard, a segment a few
+        // milliseconds longer than one window emits a second window overlapping the first by
+        // ~99%, and the accumulator sums near-identical audio as independent evidence.
+        //
+        // The threshold is the hop, not the minimum embed duration: overlap with the previous
+        // window is `windowSamples - uncovered`, so requiring a full hop bounds the tail's overlap
+        // at exactly the same 50% that every regular striding pair already has. A smaller
+        // threshold would leave the last pair markedly more correlated than the rest, while the
+        // accumulator sums them all as though equally independent.
         val uncovered = samples.size - (offset - hopSamples + windowSamples)
-        if (uncovered >= millisToSamples(config.minEmbedDurationMs)) {
+        if (uncovered >= hopSamples) {
             val start = samples.size - windowSamples
             windows += Window(start, samples.copyOfRange(start, samples.size))
         }
