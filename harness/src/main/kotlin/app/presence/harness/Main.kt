@@ -68,6 +68,7 @@ fun main(argv: Array<String>) {
 
     val recordings = Manifest.readRecordings(manifestDir.resolve("recordings.csv"))
     val events = Manifest.readEvents(manifestDir.resolve("events.csv"))
+    validateEvents(recordings, events)
     println("Loaded ${recordings.size} recordings and ${events.size} call events.")
     if (holdout.isNotEmpty()) println("Holding out households: ${holdout.joinToString()}")
 
@@ -130,6 +131,32 @@ fun main(argv: Array<String>) {
             val best = outcomes.filter { it.label == "ALL" }.minByOrNull { it.verdict.ordinal }
             println("Best overall verdict: ${best?.verdict ?: "none"}")
         }
+    }
+}
+
+/**
+ * An event whose path does not match a manifest row would be silently dropped by the replay
+ * filter, lowering totalEvents and raising the detection rate. One pointing at a non-target
+ * recording would let a false alarm be counted as a hit. Both corrupt the headline number quietly,
+ * so both are fatal at load time.
+ */
+private fun validateEvents(recordings: List<Recording>, events: List<CallEvent>) {
+    val byPath = recordings.associateBy { it.path }
+    val problems = events.mapNotNull { event ->
+        val recording = byPath[event.recordingPath]
+        when {
+            recording == null -> "${event.recordingPath}: no such recording in the manifest"
+            recording.role != RecordingRole.TARGET_CHILD ->
+                "${event.recordingPath}: events may only be labelled on target-child recordings, " +
+                    "but this is ${recording.role}"
+            recording.speakerId != event.targetSpeakerId ->
+                "${event.recordingPath}: event names speaker '${event.targetSpeakerId}' but the " +
+                    "recording is by '${recording.speakerId}'"
+            else -> null
+        }
+    }
+    require(problems.isEmpty()) {
+        "events.csv does not agree with recordings.csv:\n" + problems.joinToString("\n") { "  - $it" }
     }
 }
 
