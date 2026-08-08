@@ -16,11 +16,13 @@ Everything happens on the device. No account, no server, no audio ever uploaded.
 
 ## Status
 
-**Design phase.** No implementation code yet — deliberately.
+**Building Phase 0.** The detection engine and its evaluation harness are under construction on the
+`phase0-accuracy-harness` branch, following
+[the implementation plan](docs/superpowers/plans/2026-08-07-phase0-accuracy-harness.md). No UI, no
+Android code, and no iOS code yet — deliberately.
 
-The next milestone is a *Phase 0 accuracy spike* (spec §9): a JVM harness that measures the detection
-system — not just the model — against public child-speech benchmarks and a household simulation set,
-before any UI is built.
+Phase 0 (spec §9) is a JVM harness that measures the detection *system* — not just the model —
+against public child-speech benchmarks and a household simulation set, before any UI is built.
 
 That ordering isn't caution for its own sake. Recognizing a specific child's voice is the whole
 product and it is genuinely hard: adult-trained speaker models measure around **31% EER on children's
@@ -33,7 +35,10 @@ top. Spec §4.1 lays out that accuracy ladder with sources, and §9 defines expl
 | Path | Contents |
 |---|---|
 | `docs/superpowers/specs/2026-08-06-presence-design.md` | The full design specification — architecture, detection pipeline, per-platform intervention design, permissions, failure modes, testing strategy |
+| `docs/superpowers/plans/2026-08-07-phase0-accuracy-harness.md` | The Phase 0 implementation plan, task by task |
 | `docs/design/UI_DESIGN_PROMPT.md` | A self-contained, ready-to-paste prompt for designing the complete UI. Hand it to a fresh Claude session |
+| `shared/` | Kotlin Multiplatform detection engine — framing, VAD gating, embeddings, household scoring, evidence accumulation |
+| `harness/` | JVM-only evaluation harness that drives the engine over a corpus |
 
 **Collecting recordings?** Read **spec §9.1** first. It specifies consent scope, who to record, both
 languages plus code-switching, acoustic conditions, negative material, labelling, and the held-out

@@ -3168,7 +3168,7 @@ Expected: PASS, 3 tests, with both signatures printed.
 
 Also confirm the split works — the model tests must not run in the default suite:
 
-Run: `./gradlew :shared:test`
+Run: `./gradlew :shared:jvmTest`
 Expected: PASS, and `OnnxModelSessionTest` does **not** appear.
 
 - [ ] **Step 7: Document the workflow in the README**
