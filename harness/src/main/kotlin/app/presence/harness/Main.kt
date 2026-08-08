@@ -97,6 +97,11 @@ fun main(argv: Array<String>) {
             outputName = args["output-name"] ?: "embs",
         ).use { embedder ->
             val traces = ArrayList<Trace>()
+            val totalToTrace = recordings.groupBy { it.householdId }.values.sumOf { householdRecordings ->
+                val split = Evaluation.splitCorpus(householdRecordings)
+                split.positives.size + split.negatives.size
+            }
+            var traced = 0
 
             for ((householdId, householdRecordings) in recordings.groupBy { it.householdId }) {
                 val split = Evaluation.splitCorpus(householdRecordings)
@@ -119,7 +124,17 @@ fun main(argv: Array<String>) {
                 println("Household $householdId: target ${target.personId}, cohort ${cohort.map { it.personId }}")
 
                 for (recording in split.positives + split.negatives) {
-                    traces += traceOf(recording, manifestDir, vad, embedder, target, cohort)
+                    // One bad file must not abort a multi-hour run and discard every trace
+                    // computed so far — WavReader.read is designed to be caught per file.
+                    try {
+                        traces += traceOf(recording, manifestDir, vad, embedder, target, cohort)
+                    } catch (failure: UnsupportedAudioException) {
+                        val message = "$householdId: skipped ${recording.path} — ${failure.message}"
+                        println("  $message")
+                        warnings += message
+                    }
+                    traced += 1
+                    if (traced % 25 == 0) println("  ... $traced/$totalToTrace recordings traced")
                 }
             }
 
@@ -189,7 +204,12 @@ private fun enrolProfiles(
     enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
         val clips = group.mapNotNull { recording ->
             val language = recording.language ?: return@mapNotNull null
-            val samples = WavReader.read(root.resolve(recording.path))
+            val samples = try {
+                WavReader.read(root.resolve(recording.path))
+            } catch (failure: UnsupportedAudioException) {
+                warnings += "$speakerId: skipped ${recording.path} — ${failure.message}"
+                return@mapNotNull null
+            }
             if (samples.size < SAMPLE_RATE_HZ) return@mapNotNull null
             EnrollmentClip(language, embedder.embed(samples), samples.size.toDouble() / SAMPLE_RATE_HZ)
         }
