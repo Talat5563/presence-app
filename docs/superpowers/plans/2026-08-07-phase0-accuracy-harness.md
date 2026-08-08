@@ -3311,6 +3311,10 @@ class SileroVadTest {
     private fun noise(seed: Int) =
         Random(seed).let { rng -> FloatArray(512) { rng.nextFloat() * 0.02f - 0.01f } }
 
+    /** Broadband noise at amplitude 0.5 — the one synthetic signal Silero reacts to. */
+    private fun loudNoise(seed: Int) =
+        Random(seed).let { rng -> FloatArray(512) { rng.nextFloat() - 0.5f } }
+
     @Test
     fun `reports the frame size the model requires`() {
         withVad { vad -> assertEquals(512, vad.frameSize) }
@@ -3327,18 +3331,55 @@ class SileroVadTest {
         }
     }
 
+    /**
+     * Silero is not an energy detector — it responds to speech specifically. A pure tone has no
+     * broadband excitation, no formant structure and no temporal dynamics, so the model rates it
+     * no higher than silence. Measured on the real model: silence 5.42e-4, tone 5.26e-4 (the tone
+     * marginally *lower*), loud broadband noise 8.22e-4 — the only synthetic signal it reacts to.
+     *
+     * So this is a smoke test that the model is genuinely a function of its input rather than
+     * returning a constant. Real speech discrimination is measured on actual recordings in
+     * Task 17; it cannot be established with synthetic audio.
+     */
     @Test
-    fun `scores silence lower than a voiced tone`() {
+    fun `distinguishes broadband noise from digital silence`() {
         withVad { vad ->
             // Averaged over several frames: the recurrent state settles after the first few.
             val silenceScore = (1..10).map { vad.speechProbability(silence()) }.average()
             vad.reset()
-            val toneScore = (1..10).map { vad.speechProbability(tone()) }.average()
+            val noiseScore = (1..10).map { vad.speechProbability(loudNoise(it)) }.average()
 
             assertTrue(
-                toneScore > silenceScore,
-                "a voiced tone ($toneScore) should score above silence ($silenceScore)",
+                noiseScore > silenceScore * 1.2,
+                "broadband noise ($noiseScore) should score clearly above silence ($silenceScore)",
             )
+        }
+    }
+
+    /**
+     * Records what the model actually does with synthetic signals, for calibration. Asserts only
+     * what must hold regardless — an ordering assertion here would be wishful thinking, since
+     * none of these inputs is speech.
+     */
+    @Test
+    fun `reports synthetic signal probabilities for inspection`() {
+        withVad { vad ->
+            val readings = linkedMapOf<String, Double>()
+            listOf(
+                "silence" to { silence() },
+                "tone-150Hz" to { tone(150.0) },
+                "tone-220Hz" to { tone(220.0) },
+                "quiet-noise" to { noise(1) },
+                "loud-noise" to { loudNoise(1) },
+            ).forEach { (label, make) ->
+                vad.reset()
+                readings[label] = (1..10).map { vad.speechProbability(make()) }.average()
+            }
+            println("Silero synthetic-signal probabilities: $readings")
+
+            readings.forEach { (label, value) ->
+                assertTrue(value in 0.0..1.0 && value.isFinite(), "$label produced $value")
+            }
         }
     }
 
@@ -3459,7 +3500,7 @@ class SileroVad(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:integrationTest --tests "app.presence.onnx.SileroVadTest"`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 If a cast fails, print the actual value's class — an ONNX output's `value` is a nested `Array`
 whose depth equals the tensor rank, and `stateN`'s reported shape has dynamic dimensions.
