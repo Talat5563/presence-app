@@ -3016,10 +3016,37 @@ VAD_URL="https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero
 DEST="models"
 
 mkdir -p "$DEST"
-echo "Fetching Silero VAD..."
-curl -fsSL "$VAD_URL" -o "$DEST/silero_vad.onnx"
-echo "Fetching speaker embedding model..."
-curl -fsSL "$EMBEDDING_URL" -o "$DEST/speaker_embedding.onnx"
+
+download() {
+  local url="$1" dest="$2" label="$3"
+  local tmp="${dest}.partial"
+
+  echo "Fetching ${label}..."
+  curl -fsSL "$url" -o "$tmp"
+
+  # An ONNX file is protobuf; its opening bytes are never an HTML document. This catches a 200
+  # response that is a landing page rather than the model — the one failure mode curl -f misses.
+  if head -c 512 "$tmp" | grep -qiE '<!doctype html|<html'; then
+    rm -f "$tmp"
+    echo "error: ${url} returned an HTML page, not a model" >&2
+    exit 1
+  fi
+
+  local size
+  size=$(wc -c < "$tmp")
+  if [ "$size" -lt 1000000 ]; then
+    rm -f "$tmp"
+    echo "error: ${url} returned only ${size} bytes; expected a multi-megabyte model" >&2
+    exit 1
+  fi
+
+  # Only replace the existing file once the download is known good, so a failure mid-transfer
+  # cannot destroy a working model.
+  mv "$tmp" "$dest"
+}
+
+download "$VAD_URL" "$DEST/silero_vad.onnx" "Silero VAD"
+download "$EMBEDDING_URL" "$DEST/speaker_embedding.onnx" "speaker embedding model"
 
 # Which model produced which numbers is part of every Phase 0 result.
 cat > "$DEST/PROVENANCE.txt" <<PROVENANCE
@@ -3048,8 +3075,10 @@ They should already be there. If not, run `./tools/fetch-models.sh`.
 ```kotlin
 package app.presence.onnx
 
+import ai.onnxruntime.TensorInfo
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
@@ -3080,6 +3109,13 @@ class OnnxModelSessionTest {
             assertTrue("sr" in session.inputNames)
             assertTrue("output" in session.outputNames)
             assertTrue("stateN" in session.outputNames)
+
+            // Shapes, not just names: Task 12 hardcodes these dimensions.
+            val state = session.inputInfo.getValue("state").info as TensorInfo
+            assertEquals(2L, state.shape[0], "Silero v5 carries 2 state layers")
+            assertEquals(128L, state.shape[2], "Silero v5 state width is 128")
+            // stateN is deliberately not asserted: its static metadata reports a fully dynamic
+            // [-1, -1, -1] rather than mirroring state's declared shape.
         }
     }
 
@@ -3090,6 +3126,17 @@ class OnnxModelSessionTest {
 
             assertTrue("feats" in session.inputNames, "inputs were ${session.inputNames}")
             assertTrue("embs" in session.outputNames, "outputs were ${session.outputNames}")
+
+            // Shapes, not just names. A swapped model exposing the same names with a different
+            // feature width or embedding dimension would otherwise pass, and Tasks 13 and 14
+            // hardcode 80 and 256.
+            val feats = session.inputInfo.getValue("feats").info as TensorInfo
+            assertEquals(3, feats.shape.size, "feats should be [B, T, 80]")
+            assertEquals(80L, feats.shape[2], "Task 13's filterbank produces 80 bins")
+
+            val embs = session.outputInfo.getValue("embs").info as TensorInfo
+            assertEquals(2, embs.shape.size, "embs should be [B, 256]")
+            assertEquals(256L, embs.shape[1], "Task 14 expects 256 dimensions")
         }
     }
 }
@@ -3107,6 +3154,7 @@ Expected: FAIL — unresolved reference `OnnxModelSession`.
 ```kotlin
 package app.presence.onnx
 
+import ai.onnxruntime.NodeInfo
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -3135,6 +3183,10 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
     val inputNames: List<String> get() = session.inputNames.toList()
     val outputNames: List<String> get() = session.outputNames.toList()
 
+    /** Full node info, so a test can assert declared tensor shapes and not just names. */
+    val inputInfo: Map<String, NodeInfo> get() = session.inputInfo
+    val outputInfo: Map<String, NodeInfo> get() = session.outputInfo
+
     /** Human-readable dump of every input and output, with shapes. */
     fun describeSignature(): String = buildString {
         appendLine("inputs:")
@@ -3143,7 +3195,12 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
         session.outputInfo.forEach { (name, info) -> appendLine("  $name: ${info.info}") }
     }
 
-    /** Builds a float tensor of the given shape. [runTensors] closes it for you. */
+    /**
+     * Builds a float tensor of the given shape. [runTensors] closes it for you.
+     *
+     * ONNX Runtime copies a non-direct buffer into its own direct allocation synchronously here,
+     * so the caller's array is not aliased and may be reused or mutated once this returns.
+     */
     fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor =
         OnnxTensor.createTensor(environment, FloatBuffer.wrap(data), shape)
 
