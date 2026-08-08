@@ -390,7 +390,7 @@ Measured on the household-simulation set (§9.1), with L1 and L2 active:
 
 - **Ship:** ≤ 1 false alarm per 2 hours of active listening, at ≥ 80% detection of real
   attention-seeking events within 10 seconds.
-- **Iterate:** false alarms between 1 per 2 hours and 2 per hour, or detection between 50% and 80%.
+- **Iterate:** ≤ 2 false alarms per hour **and** ≥ 50% detection — both required. Either dimension falling below its floor means fall back, however good the other is: 5 false alarms an hour is unusable whatever the detection rate, and 40% detection is useless however quiet.
 - **Fall back:** worse than that after L3. The fallback is Channel A alone — a personalized
   wake-phrase detector with a speaker check, which is a narrower but genuinely useful product, and
   a far more honest one than a text-independent detector that cries wolf.
