@@ -1733,6 +1733,36 @@ class HouseholdMatcherTest {
         assertEquals(0f, score.logLikelihoodRatio)
     }
 
+    /**
+     * The test the z gate cannot satisfy. A winning target always sits far above the cohort mean
+     * in standard-deviation terms, so only the absolute floor can reject a voice that beats the
+     * household without resembling anyone much. Needs a fourth dimension so the observation can
+     * hold energy matching nobody.
+     */
+    @Test
+    fun `a weak absolute match produces no positive evidence even when it beats the cohort`() {
+        val target = profile("maya", VoiceProfile.Role.TARGET_CHILD, Language.ENGLISH to floatArrayOf(1f, 0f, 0f, 0f))
+        val parent = profile("parent", VoiceProfile.Role.PARENT, Language.ENGLISH to floatArrayOf(0f, 1f, 0f, 0f))
+        val sibling = profile("sibling", VoiceProfile.Role.SIBLING, Language.ENGLISH to floatArrayOf(0f, 0f, 1f, 0f))
+        // Similarity 0.30 to the target, 0.05 to each cohort member, the rest matching nobody.
+        val stranger = observation(0.30f, 0.05f, 0.05f, 0.9513f)
+
+        val score = HouseholdMatcher(target, listOf(parent, sibling)).score(stranger)
+
+        assertTrue(score.targetSimilarity > score.bestNonTargetSimilarity, "target should nominally win")
+        assertTrue(score.cohortZ >= 0.5f, "the z gate does not bind here — that is the point")
+        assertEquals(0f, score.logLikelihoodRatio, "the absolute floor must suppress this")
+    }
+
+    @Test
+    fun `a negative example close to the target also vetoes`() {
+        val nearMiss = maya.copy(negatives = listOf(observation(0.97f, 0.2431f, 0f)))
+
+        val score = matcher(target = nearMiss).score(observation(1f, 0f, 0f))
+
+        assertEquals(0f, score.logLikelihoodRatio)
+    }
+
     @Test
     fun `a negative example unlike the observation does not veto`() {
         val withNegative = maya.copy(negatives = listOf(observation(0f, 0f, 1f)))
@@ -1820,6 +1850,20 @@ data class MatchScore(
 data class MatcherConfig(
     val softmaxTemperature: Float = 0.1f,
     val minCohortZ: Float = 0.5f,
+    /**
+     * Absolute similarity the target must reach before any positive evidence is allowed.
+     *
+     * The z-score alone cannot do this job. For two cohort similarities, `max − mean` equals the
+     * population standard deviation exactly, and a winning target must exceed `max(cohort)`, so
+     * `z > 1` always — the z floor never binds for a normal-sized household. Without an absolute
+     * floor, a stranger who resembles the target more than the family does passes unchallenged.
+     * Calibrate against real embeddings in Phase 0: this is the single most important open-set knob.
+     */
+    val minTargetSimilarity: Float = 0.35f,
+    /** Floor on the cohort standard deviation, in cosine units — keeps z finite and meaningful. */
+    val minCohortStdDev: Float = 0.02f,
+    /** How close a negative example may come to the target before it vetoes the match. */
+    val negativeVetoMargin: Float = 0.05f,
     val fallbackCohortMean: Float = 0.15f,
     val fallbackCohortStdDev: Float = 0.10f,
     val maxAbsLlr: Float = 4.0f,
@@ -1860,14 +1904,20 @@ class HouseholdMatcher(
         val z = cohortZScore(targetSimilarity, cohortSimilarities)
         var llr = closedSetLogLikelihoodRatio(targetSimilarity, cohortSimilarities)
 
-        // Open-set gate. A stranger or the television resembles nobody in particular, but the
-        // posterior alone would still crown a winner among the enrolled.
+        // Open-set gates. A stranger or the television resembles nobody in particular, but the
+        // posterior alone would still crown a winner among the enrolled. Both gates are needed:
+        // the z floor only binds in the single-cohort-member fallback (see minTargetSimilarity),
+        // and the absolute floor is what actually rejects a stranger in a normal household.
         if (z < config.minCohortZ) llr = minOf(llr, 0f)
+        if (targetSimilarity < config.minTargetSimilarity) llr = minOf(llr, 0f)
 
         // "Not them" vetoes. A drifting profile should decay toward silence, never toward
-        // firing on a sibling.
+        // firing on a sibling. The margin matters: without it the veto fires only when a negative
+        // outright beats the target, which is not the drift case it exists for.
         val closestNegative = target.negatives.maxOfOrNull { cosine(observation, it) }
-        if (closestNegative != null && closestNegative >= targetSimilarity) llr = minOf(llr, 0f)
+        if (closestNegative != null && closestNegative >= targetSimilarity - config.negativeVetoMargin) {
+            llr = minOf(llr, 0f)
+        }
 
         return MatchScore(
             targetSimilarity = targetSimilarity,
@@ -1893,7 +1943,7 @@ class HouseholdMatcher(
         }
         val stdDev = sqrt(sumSquaredDeviation / cohortSimilarities.size)
             .toFloat()
-            .coerceAtLeast(1e-4f)
+            .coerceAtLeast(config.minCohortStdDev)
         return (targetSimilarity - mean) / stdDev
     }
 
@@ -1921,7 +1971,7 @@ class HouseholdMatcher(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.HouseholdMatcherTest"`
-Expected: PASS, 11 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
