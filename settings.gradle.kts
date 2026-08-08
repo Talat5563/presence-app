@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 rootProject.name = "presence"
 
 include(":shared")
+include(":harness")
