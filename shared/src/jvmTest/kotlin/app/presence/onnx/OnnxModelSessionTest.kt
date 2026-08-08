@@ -1,7 +1,9 @@
 package app.presence.onnx
 
+import ai.onnxruntime.TensorInfo
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
@@ -32,6 +34,10 @@ class OnnxModelSessionTest {
             assertTrue("sr" in session.inputNames)
             assertTrue("output" in session.outputNames)
             assertTrue("stateN" in session.outputNames)
+
+            val state = session.inputInfo.getValue("state").info as TensorInfo
+            assertEquals(2L, state.shape[0], "Silero v5 carries 2 state layers")
+            assertEquals(128L, state.shape[2], "Silero v5 state width is 128")
         }
     }
 
@@ -42,6 +48,14 @@ class OnnxModelSessionTest {
 
             assertTrue("feats" in session.inputNames, "inputs were ${session.inputNames}")
             assertTrue("embs" in session.outputNames, "outputs were ${session.outputNames}")
+
+            val feats = session.inputInfo.getValue("feats").info as TensorInfo
+            assertEquals(3, feats.shape.size, "feats should be [B, T, 80]")
+            assertEquals(80L, feats.shape[2], "Task 13's filterbank produces 80 bins")
+
+            val embs = session.outputInfo.getValue("embs").info as TensorInfo
+            assertEquals(2, embs.shape.size, "embs should be [B, 256]")
+            assertEquals(256L, embs.shape[1], "Task 14 expects 256 dimensions")
         }
     }
 }

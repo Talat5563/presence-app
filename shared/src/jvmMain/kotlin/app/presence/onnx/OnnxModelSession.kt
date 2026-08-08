@@ -1,5 +1,6 @@
 package app.presence.onnx
 
+import ai.onnxruntime.NodeInfo
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -28,6 +29,10 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
     val inputNames: List<String> get() = session.inputNames.toList()
     val outputNames: List<String> get() = session.outputNames.toList()
 
+    /** Per-tensor shape/type info, keyed by name — lets a test pin down a model's contract. */
+    val inputInfo: Map<String, NodeInfo> get() = session.inputInfo
+    val outputInfo: Map<String, NodeInfo> get() = session.outputInfo
+
     /** Human-readable dump of every input and output, with shapes. */
     fun describeSignature(): String = buildString {
         appendLine("inputs:")
@@ -36,7 +41,12 @@ class OnnxModelSession(modelPath: Path) : AutoCloseable {
         session.outputInfo.forEach { (name, info) -> appendLine("  $name: ${info.info}") }
     }
 
-    /** Builds a float tensor of the given shape. [runTensors] closes it for you. */
+    /**
+     * Builds a float tensor of the given shape. [runTensors] closes it for you.
+     *
+     * ONNX Runtime copies a non-direct buffer into its own direct allocation synchronously here,
+     * so the caller's array is not aliased and may be reused or mutated once this returns.
+     */
     fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor =
         OnnxTensor.createTensor(environment, FloatBuffer.wrap(data), shape)
 
