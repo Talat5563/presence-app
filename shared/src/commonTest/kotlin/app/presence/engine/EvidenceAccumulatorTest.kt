@@ -147,4 +147,12 @@ class EvidenceAccumulatorTest {
         // would have fired instead.
         assertNull(subject.accept(Observation(60_000, 3.0f)))
     }
+
+    @Test
+    fun `firing is allowed the moment the cooldown has exactly elapsed`() {
+        val subject = accumulator()
+        assertNotNull(subject.accept(Observation(0, 7.0f)))
+
+        assertClose(7.0f, assertNotNull(subject.accept(Observation(60_000, 7.0f))))
+    }
 }
