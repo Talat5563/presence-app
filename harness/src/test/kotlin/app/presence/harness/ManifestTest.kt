@@ -166,6 +166,16 @@ class ManifestTest {
     }
 
     @Test
+    fun `rejects a manifest listing the same audio path twice`() {
+        val row = "dup.wav,h1,maya,target_child,hebrew,false,spontaneous,1.0,table,quiet,kitchen,2026-08-01"
+        val file = tempFile("recordings.csv", "$recordingsHeader\n$row\n$row\n")
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("dup.wav"), failure.message!!)
+    }
+
+    @Test
     fun `a malformed number names the file and line`() {
         val file = tempFile(
             "recordings.csv",

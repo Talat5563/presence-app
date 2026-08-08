@@ -177,4 +177,14 @@ class EvaluationTest {
         assertEquals(2, lines.size)
         assertTrue(lines[0].startsWith("label,threshold"))
     }
+
+    @Test
+    fun `the report surfaces warnings that qualify the numbers`() {
+        val outcomes = listOf(Outcome("ALL", 6f, 1, 2.0, 8, 10, listOf(1_000L)))
+
+        val markdown = Report.markdown(outcomes, "vad: x", listOf("noam: enrolled partially"))
+
+        assertTrue(markdown.contains("Warnings"))
+        assertTrue(markdown.contains("noam: enrolled partially"))
+    }
 }

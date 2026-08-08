@@ -42,10 +42,23 @@ Run ./tools/fetch-models.sh first. See spec §9.1 for the manifest format.
 """
 
 fun main(argv: Array<String>) {
-    val args = parseArgs(argv)
+    val args = try {
+        parseArgs(argv)
+    } catch (failure: IllegalArgumentException) {
+        System.err.println("error: ${failure.message}")
+        println(USAGE)
+        exitProcess(2)
+    }
     if (args.isEmpty() || "help" in args) {
         println(USAGE)
         return
+    }
+    for (required in listOf("manifest", "models", "out")) {
+        if (required !in args) {
+            System.err.println("error: --$required is required")
+            println(USAGE)
+            exitProcess(2)
+        }
     }
 
     val manifestDir = Path.of(args.getValue("manifest"))
@@ -58,6 +71,8 @@ fun main(argv: Array<String>) {
     println("Loaded ${recordings.size} recordings and ${events.size} call events.")
     if (holdout.isNotEmpty()) println("Holding out households: ${holdout.joinToString()}")
 
+    val warnings = mutableListOf<String>()
+
     SileroVad(OnnxModelSession(modelsDir.resolve("silero_vad.onnx"))).use { vad ->
         OnnxSpeakerEmbedder(
             OnnxModelSession(modelsDir.resolve("speaker_embedding.onnx")),
@@ -68,15 +83,20 @@ fun main(argv: Array<String>) {
 
             for ((householdId, householdRecordings) in recordings.groupBy { it.householdId }) {
                 val split = Evaluation.splitCorpus(householdRecordings)
-                val profiles = enrolProfiles(split.enrollment, manifestDir, embedder)
+                val profiles = enrolProfiles(split.enrollment, manifestDir, embedder, warnings)
                 val target = profiles.firstOrNull { it.role == VoiceProfile.Role.TARGET_CHILD }
                 if (target == null) {
-                    println("SKIP household $householdId: no target child enrolled")
+                    val message = "SKIP household $householdId: no target child enrolled"
+                    println(message)
+                    warnings += message
                     continue
                 }
                 val cohort = profiles - target
                 if (cohort.isEmpty()) {
-                    println("SKIP household $householdId: no cohort — spec §5 requires the parent and siblings")
+                    val message =
+                        "SKIP household $householdId: no cohort — spec §5 requires the parent and siblings"
+                    println(message)
+                    warnings += message
                     continue
                 }
                 println("Household $householdId: target ${target.personId}, cohort ${cohort.map { it.personId }}")
@@ -103,7 +123,7 @@ fun main(argv: Array<String>) {
             val provenance = if (provenanceFile.exists()) provenanceFile.readText() else "unknown"
 
             outDir.createDirectories()
-            outDir.resolve("report.md").writeText(Report.markdown(outcomes, provenance))
+            outDir.resolve("report.md").writeText(Report.markdown(outcomes, provenance, warnings))
             outDir.resolve("results.csv").writeText(Report.csv(outcomes))
             println("Wrote ${outDir.resolve("report.md")} and ${outDir.resolve("results.csv")}")
 
@@ -117,25 +137,35 @@ private fun enrolProfiles(
     enrollment: List<Recording>,
     root: Path,
     embedder: SpeakerEmbedder,
-): List<VoiceProfile> {
-    val service = EnrollmentService(EnrollmentPolicy(minSecondsPerLanguage = 20.0))
-    return enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
+    warnings: MutableList<String>,
+): List<VoiceProfile> =
+    enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
         val clips = group.mapNotNull { recording ->
             val language = recording.language ?: return@mapNotNull null
             val samples = WavReader.read(root.resolve(recording.path))
             if (samples.size < SAMPLE_RATE_HZ) return@mapNotNull null
             EnrollmentClip(language, embedder.embed(samples), samples.size.toDouble() / SAMPLE_RATE_HZ)
         }
-        if (clips.isEmpty()) return@mapNotNull null
-        when (val result = service.enroll(speakerId, group.first().role.toProfileRole(), clips)) {
+        if (clips.isEmpty()) {
+            warnings += "$speakerId: no usable enrollment audio"
+            return@mapNotNull null
+        }
+        // Require only the languages this person actually has material for. Demanding both would
+        // flag every monolingual household, drowning real shortfalls in expected noise.
+        val policy = EnrollmentPolicy(
+            minSecondsPerLanguage = 20.0,
+            requiredLanguages = clips.map { it.language }.toSet(),
+        )
+        when (val result = EnrollmentService(policy).enroll(speakerId, group.first().role.toProfileRole(), clips)) {
             is EnrollmentResult.Complete -> result.profile
             is EnrollmentResult.Incomplete -> {
-                println("  $speakerId enrolled partially; short by ${result.shortfallSeconds}")
+                val message = "$speakerId: enrolled partially, short by ${result.shortfallSeconds}"
+                println("  $message")
+                warnings += message
                 result.profile
             }
         }
     }
-}
 
 private fun traceOf(
     recording: Recording,
@@ -165,24 +195,31 @@ private fun traceOf(
     return Trace(recording, observations, samples.size.toDouble() / SAMPLE_RATE_HZ)
 }
 
-private fun parseArgs(argv: Array<String>): Map<String, String> {
+private val KNOWN_FLAGS = setOf(
+    "help", "manifest", "models", "out", "holdout", "input-name", "output-name",
+)
+
+internal fun parseArgs(argv: Array<String>): Map<String, String> {
     val args = mutableMapOf<String, String>()
     var index = 0
     while (index < argv.size) {
         val token = argv[index]
-        if (!token.startsWith("--")) {
-            System.err.println("unexpected argument: $token")
-            exitProcess(1)
-        }
+        require(token.startsWith("--")) { "unexpected argument: $token" }
         val key = token.removePrefix("--")
+        require(key in KNOWN_FLAGS) {
+            "unknown flag --$key. Known flags: ${KNOWN_FLAGS.sorted().joinToString { "--$it" }}"
+        }
         if (key == "help") {
             args["help"] = "true"
             index += 1
-        } else {
-            require(index + 1 < argv.size) { "missing value for --$key" }
-            args[key] = argv[index + 1]
-            index += 2
+            continue
         }
+        require(index + 1 < argv.size) { "missing value for --$key" }
+        val value = argv[index + 1]
+        // A flag-shaped value almost always means the real value was forgotten.
+        require(!value.startsWith("--")) { "--$key expects a value but was followed by $value" }
+        args[key] = value
+        index += 2
     }
     return args
 }

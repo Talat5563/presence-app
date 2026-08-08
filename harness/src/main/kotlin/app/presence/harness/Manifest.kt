@@ -78,7 +78,7 @@ object Manifest {
         require(rows.isNotEmpty()) { "$path has a header but no data rows" }
         requireColumns(rows.first().second.keys, REQUIRED_RECORDING_COLUMNS, path)
 
-        return rows.map { (lineNumber, row) ->
+        val recordings = rows.map { (lineNumber, row) ->
             withRowContext(path, lineNumber) {
                 Recording(
                     path = row.getValue("path"),
@@ -97,6 +97,17 @@ object Manifest {
                 )
             }
         }
+
+        // A duplicate path would let two different rows' evidence resolve to the same recording
+        // downstream — Evaluation.replay used to look detections back up by path, and a repeated
+        // path silently misclassified false alarms. Rejecting it here closes the root cause.
+        val duplicatePaths = recordings.groupingBy { it.path }.eachCount().filterValues { it > 1 }.keys
+        require(duplicatePaths.isEmpty()) {
+            "$path lists these audio paths more than once: ${duplicatePaths.joinToString()} — " +
+                "each recording must appear once"
+        }
+
+        return recordings
     }
 
     fun readEvents(path: Path): List<CallEvent> {
