@@ -134,14 +134,14 @@ class DetectionEngineTest {
 
     @Test
     fun `reports every observation to the listener`() {
-        val seen = mutableListOf<Observation>()
+        val seen = mutableListOf<MatchScore>()
         val subject = DetectionEngine(
             vadGate = VadGate(AlwaysSpeech()),
             embedder = FakeEmbedder(),
             matcher = HouseholdMatcher(maya, listOf(parent, sibling)),
             accumulator = EvidenceAccumulator(),
             targetPersonId = "maya",
-            observationListener = { seen += it },
+            observationListener = { _, score -> seen += score },
         )
 
         repeat(200) { subject.accept(targetFrame()) }

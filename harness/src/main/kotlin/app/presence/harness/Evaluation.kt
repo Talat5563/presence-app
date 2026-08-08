@@ -2,7 +2,18 @@ package app.presence.harness
 
 import app.presence.engine.AccumulatorConfig
 import app.presence.engine.EvidenceAccumulator
+import app.presence.engine.MatchScore
 import app.presence.engine.Observation
+
+/**
+ * A timestamp paired with the full [MatchScore] that produced it, not just the gated LLR the
+ * accumulator consumes.
+ *
+ * Caching the whole score — rather than a bare [Observation] — is what would let a future sweep
+ * replay [app.presence.engine.MatcherConfig.applyGates] at different gate settings without
+ * re-embedding audio; today's sweep still only varies `fireThreshold`.
+ */
+data class TimedScore(val timestampMs: Long, val score: MatchScore)
 
 /**
  * One recording's scored observations, cached so a threshold sweep can replay accumulators
@@ -10,7 +21,7 @@ import app.presence.engine.Observation
  */
 data class Trace(
     val recording: Recording,
-    val observations: List<Observation>,
+    val observations: List<TimedScore>,
     val durationSeconds: Double,
 )
 
@@ -63,9 +74,10 @@ object Evaluation {
 
         for (trace in selected) {
             val accumulator = EvidenceAccumulator(AccumulatorConfig(fireThreshold = threshold))
-            for (observation in trace.observations) {
+            for (timed in trace.observations) {
+                val observation = Observation(timed.timestampMs, timed.score.logLikelihoodRatio)
                 if (accumulator.accept(observation) != null) {
-                    detections += Detection(trace.recording.path, observation.timestampMs)
+                    detections += Detection(trace.recording.path, timed.timestampMs)
                 }
             }
             exposureSeconds += trace.durationSeconds

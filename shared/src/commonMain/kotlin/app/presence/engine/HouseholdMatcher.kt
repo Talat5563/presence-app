@@ -11,12 +11,17 @@ import kotlin.math.sqrt
  *   who happens to resemble the target slightly more than the others".
  * @param logLikelihoodRatio the evidence this observation contributes. Positive favours the
  *   target; the accumulator sums these across segments.
+ * @param rawLogLikelihoodRatio the closed-set LLR before the open-set gates and negative veto are
+ *   applied. Caching this alongside the gated value is what lets a threshold sweep replay
+ *   [MatcherConfig.applyGates] at different gate settings without re-embedding audio — only
+ *   [logLikelihoodRatio] itself is free to sweep otherwise.
  */
 data class MatchScore(
     val targetSimilarity: Float,
     val bestNonTargetSimilarity: Float,
     val cohortZ: Float,
     val logLikelihoodRatio: Float,
+    val rawLogLikelihoodRatio: Float,
 )
 
 /**
@@ -52,6 +57,30 @@ data class MatcherConfig(
         require(fallbackCohortStdDev > 0f) { "fallbackCohortStdDev must be positive" }
         require(maxAbsLlr > 0f) { "maxAbsLlr must be positive" }
     }
+
+    /**
+     * Applies the open-set gates and the "not them" veto to a raw closed-set LLR.
+     *
+     * The single implementation [HouseholdMatcher.score] uses, and the one a future replay must
+     * use too if it recomputes evidence at different gate settings from a cached
+     * [MatchScore.rawLogLikelihoodRatio] — duplicating this logic anywhere else would let the two
+     * silently drift apart.
+     */
+    fun applyGates(raw: Float, targetSimilarity: Float, cohortZ: Float, closestNegative: Float?): Float {
+        var llr = raw
+        // Open-set gates. A stranger or the television resembles nobody in particular, but the
+        // posterior alone would still crown a winner among the enrolled.
+        if (cohortZ < minCohortZ) llr = minOf(llr, 0f)
+        if (targetSimilarity < minTargetSimilarity) llr = minOf(llr, 0f)
+
+        // "Not them" veto. A drifting profile should decay toward silence, never toward firing on
+        // a sibling.
+        if (closestNegative != null && closestNegative >= targetSimilarity - negativeVetoMargin) {
+            llr = minOf(llr, 0f)
+        }
+
+        return llr.coerceIn(-maxAbsLlr, maxAbsLlr)
+    }
 }
 
 /**
@@ -81,25 +110,16 @@ class HouseholdMatcher(
         val bestNonTarget = cohortSimilarities.max()
 
         val z = cohortZScore(targetSimilarity, cohortSimilarities)
-        var llr = closedSetLogLikelihoodRatio(targetSimilarity, cohortSimilarities)
-
-        // Open-set gates. A stranger or the television resembles nobody in particular, but the
-        // posterior alone would still crown a winner among the enrolled.
-        if (z < config.minCohortZ) llr = minOf(llr, 0f)
-        if (targetSimilarity < config.minTargetSimilarity) llr = minOf(llr, 0f)
-
-        // "Not them" vetoes. A drifting profile should decay toward silence, never toward
-        // firing on a sibling.
+        val raw = closedSetLogLikelihoodRatio(targetSimilarity, cohortSimilarities)
         val closestNegative = target.negatives.maxOfOrNull { cosine(observation, it) }
-        if (closestNegative != null && closestNegative >= targetSimilarity - config.negativeVetoMargin) {
-            llr = minOf(llr, 0f)
-        }
+        val llr = config.applyGates(raw, targetSimilarity, z, closestNegative)
 
         return MatchScore(
             targetSimilarity = targetSimilarity,
             bestNonTargetSimilarity = bestNonTarget,
             cohortZ = z,
-            logLikelihoodRatio = llr.coerceIn(-config.maxAbsLlr, config.maxAbsLlr),
+            logLikelihoodRatio = llr,
+            rawLogLikelihoodRatio = raw,
         )
     }
 

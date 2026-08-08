@@ -1,7 +1,7 @@
 package app.presence.harness
 
 import app.presence.domain.Language
-import app.presence.engine.Observation
+import app.presence.engine.MatchScore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -31,8 +31,16 @@ class EvaluationTest {
         date = "2026-08-01",
     )
 
+    private fun matchScore(llr: Float) = MatchScore(
+        targetSimilarity = 1f,
+        bestNonTargetSimilarity = 0f,
+        cohortZ = 10f,
+        logLikelihoodRatio = llr,
+        rawLogLikelihoodRatio = llr,
+    )
+
     private fun trace(recording: Recording, vararg llr: Pair<Long, Float>) =
-        Trace(recording, llr.map { (ts, value) -> Observation(ts, value) }, durationSeconds = 60.0)
+        Trace(recording, llr.map { (ts, value) -> TimedScore(ts, matchScore(value)) }, durationSeconds = 60.0)
 
     // --- corpus split ---
 

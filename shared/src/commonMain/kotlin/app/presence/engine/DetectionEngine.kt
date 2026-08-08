@@ -36,12 +36,16 @@ class DetectionEngine(
     private val targetPersonId: String,
     private val config: DetectionEngineConfig = DetectionEngineConfig(),
     /**
-     * Receives every scored observation before it reaches the accumulator.
+     * Receives every scored observation, as the full [MatchScore], before it reaches the
+     * accumulator.
      *
      * The harness uses this to cache traces so an operating-point sweep can replay accumulators
-     * without re-embedding audio. Also useful for on-device diagnostics later.
+     * without re-embedding audio. Caching the whole score — not just the gated LLR the
+     * accumulator uses — is what lets that replay later sweep the matcher's own gate settings too,
+     * not only [app.presence.engine.AccumulatorConfig.fireThreshold]. Also useful for on-device
+     * diagnostics later.
      */
-    private val observationListener: ((Observation) -> Unit)? = null,
+    private val observationListener: ((timestampMs: Long, score: MatchScore) -> Unit)? = null,
 ) {
     private class Window(val offsetSamples: Int, val samples: FloatArray)
 
@@ -64,8 +68,8 @@ class DetectionEngine(
         for (window in windowsOf(segment.samples)) {
             val score = matcher.score(embedder.embed(window.samples))
             val timestampMs = toMillis(segment.startSampleIndex + window.offsetSamples + window.samples.size)
+            observationListener?.invoke(timestampMs, score)
             val observation = Observation(timestampMs, score.logLikelihoodRatio)
-            observationListener?.invoke(observation)
             val evidence = accumulator.accept(observation)
             // Only the first fire in a segment is returned, since accept() yields at most one
             // event. Unreachable under the default 60 s cooldown, which far exceeds any segment,

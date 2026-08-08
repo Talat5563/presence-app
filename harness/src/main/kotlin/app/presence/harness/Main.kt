@@ -6,7 +6,6 @@ import app.presence.domain.VoiceProfile
 import app.presence.engine.DetectionEngine
 import app.presence.engine.EvidenceAccumulator
 import app.presence.engine.HouseholdMatcher
-import app.presence.engine.Observation
 import app.presence.engine.SpeakerEmbedder
 import app.presence.engine.VadGate
 import app.presence.enrollment.EnrollmentClip
@@ -271,7 +270,7 @@ private fun traceOf(
     cohort: List<VoiceProfile>,
 ): Trace {
     val samples = WavReader.read(root.resolve(recording.path))
-    val observations = ArrayList<Observation>()
+    val observations = ArrayList<TimedScore>()
 
     vad.reset()
     val engine = DetectionEngine(
@@ -280,7 +279,7 @@ private fun traceOf(
         matcher = HouseholdMatcher(target, cohort),
         accumulator = EvidenceAccumulator(),
         targetPersonId = target.personId,
-        observationListener = { observations += it },
+        observationListener = { timestampMs, score -> observations += TimedScore(timestampMs, score) },
     )
 
     val framer = Framer(vad.frameSize)
