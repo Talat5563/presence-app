@@ -3768,6 +3768,7 @@ package app.presence.audio
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -3885,6 +3886,35 @@ class FbankExtractorTest {
             val mean = sum / features.size
             assertTrue(abs(mean) < 1e-3, "bin $bin has mean $mean after normalization")
         }
+    }
+
+    /**
+     * Guards the log floor against swallowing pathologically quiet input, and in doing so pins the
+     * ×32768 int16 scaling — the one constant no other test can reach.
+     *
+     * Mean normalization cancels any uniform gain exactly: scaling the waveform shifts every log
+     * energy by the same constant, which the per-bin mean then subtracts. So the scaling is
+     * observable only where the floor clips. This amplitude (2e-7, well below one 16-bit LSB) is
+     * chosen to sit that far down deliberately; at realistic levels the scaling provably has no
+     * effect on the output, which is why nothing else here can pin it. Noise rather than a tone,
+     * because a stationary signal normalizes to zero regardless.
+     *
+     * Verified by breaking it: 3819 distinct values with the scaling, exactly 1 without (every bin
+     * clips to the floor and normalizes to 0.0). An earlier attempt at amplitude 2e-5 did NOT
+     * discriminate — 3840 against 297 — because each mel triangle sums over many FFT bins, lifting
+     * unscaled energy back to roughly the floor and clipping only partially.
+     */
+    @Test
+    fun `quiet audio still carries information rather than clipping to the log floor`() {
+        val quiet = Random(11).let { rng -> FloatArray(8_000) { (rng.nextFloat() - 0.5f) * 2e-7f } }
+
+        val features = extractor.extract(quiet)
+
+        val distinctValues = features.flatMap { row -> row.toList() }.distinct()
+        assertTrue(
+            distinctValues.size > 1,
+            "every value collapsed to ${distinctValues.firstOrNull()} — the log floor swallowed the signal",
+        )
     }
 
     /**
@@ -4092,7 +4122,7 @@ class FbankExtractor(
 - [ ] **Step 9: Run the tests and verify they pass**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.audio.*"`
-Expected: PASS — FftTest 7, FbankExtractorTest 11, plus the earlier audio tests.
+Expected: PASS — FftTest 7, FbankExtractorTest 12, plus the earlier audio tests.
 
 - [ ] **Step 10: Commit**
 
