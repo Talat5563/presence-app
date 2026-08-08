@@ -131,4 +131,23 @@ class DetectionEngineTest {
 
         assertNotNull(event, "a single long segment should contribute multiple observations")
     }
+
+    @Test
+    fun `reports every observation to the listener`() {
+        val seen = mutableListOf<Observation>()
+        val subject = DetectionEngine(
+            vadGate = VadGate(AlwaysSpeech()),
+            embedder = FakeEmbedder(),
+            matcher = HouseholdMatcher(maya, listOf(parent, sibling)),
+            accumulator = EvidenceAccumulator(),
+            targetPersonId = "maya",
+            observationListener = { seen += it },
+        )
+
+        repeat(200) { subject.accept(targetFrame()) }
+        subject.flush()
+
+        assertTrue(seen.size >= 2, "expected several observations, got ${seen.size}")
+        assertTrue(seen.all { it.logLikelihoodRatio > 0f }, "target audio should score positive")
+    }
 }
