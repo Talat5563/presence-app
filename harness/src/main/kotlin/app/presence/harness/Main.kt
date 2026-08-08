@@ -27,20 +27,30 @@ private const val USAGE = """
 Phase 0 accuracy harness.
 
 Usage:
-  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--input-name N] [--output-name N]"
+  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--threshold N] [--input-name N] [--output-name N]"
 
   --manifest DIR     directory containing recordings.csv and events.csv; audio paths are
                      resolved relative to it
   --models DIR       directory containing silero_vad.onnx and speaker_embedding.onnx
   --out DIR          where report.md and results.csv are written
   --holdout LIST     comma-separated household ids reserved for final measurement only
-  --evaluate MODE    "dev" (default) sweeps and tunes on every household not in --holdout.
-                     "holdout" measures once, only on --holdout households, and is the only
-                     honest final number. A threshold chosen by looking at dev means nothing
-                     until it is re-measured on holdout — dev numbers are for tuning, not
-                     for deciding ship/iterate/fall-back.
+  --evaluate MODE    "dev" (default) sweeps ten thresholds and tunes on every household not in
+                     --holdout, reporting the best verdict per slice across the sweep.
+                     "holdout" measures ONE pinned operating point, given by --threshold, only on
+                     --holdout households. Sequence: choose a threshold by looking at dev sweep
+                     results, then re-run with --evaluate holdout --threshold N to get the one
+                     honest final number. Sweeping the holdout and reporting its best verdict would
+                     be tuning on the data the holdout exists to protect, so holdout mode refuses to
+                     sweep — it requires --threshold and reports exactly that one outcome per slice.
+  --threshold N      the fire threshold to measure. Required with --evaluate holdout; ignored (the
+                     sweep is used instead) in --evaluate dev.
   --input-name N     embedding model input tensor name (default: feats)
   --output-name N    embedding model output tensor name (default: embs)
+
+Caveat: a detection in an unlabelled recording — including a target-child recording with no
+labelled events at all — counts as a false alarm. That is the right default for an unlabelled
+corpus, but it biases the verdict pessimistically wherever labelling is incomplete; the report's
+Warnings section names any target-child recording with zero labelled events so this can be checked.
 
 Run ./tools/fetch-models.sh first. See spec §9.1 for the manifest format.
 """
@@ -87,7 +97,28 @@ fun main(argv: Array<String>) {
     require(mode == "dev" || mode == "holdout") { "--evaluate must be 'dev' or 'holdout', was '$mode'" }
     require(mode == "dev" || holdout.isNotEmpty()) { "--evaluate holdout needs --holdout" }
 
+    val pinnedThreshold = args["threshold"]?.toFloatOrNull()
+    require(args["threshold"] == null || pinnedThreshold != null) {
+        "--threshold must be a number, was '${args["threshold"]}'"
+    }
+    require(mode == "dev" || pinnedThreshold != null) {
+        "--evaluate holdout requires --threshold: the operating point must be chosen on the dev " +
+            "set, then measured once here. Sweeping the holdout and reporting its best verdict is " +
+            "tuning on the data the holdout exists to protect."
+    }
+
     val warnings = mutableListOf<String>()
+
+    val targetsWithoutEvents = recordings
+        .filter { it.role == RecordingRole.TARGET_CHILD }
+        .map { it.path }
+        .filterNot { path -> events.any { it.recordingPath == path } }
+    if (targetsWithoutEvents.isNotEmpty()) {
+        warnings += "${targetsWithoutEvents.size} target-child recording(s) have no labelled " +
+            "events, so every detection in them counts as a false alarm: " +
+            targetsWithoutEvents.take(5).joinToString() +
+            if (targetsWithoutEvents.size > 5) ", ..." else ""
+    }
 
     SileroVad(OnnxModelSession(modelsDir.resolve("silero_vad.onnx"))).use { vad ->
         OnnxSpeakerEmbedder(
@@ -142,7 +173,9 @@ fun main(argv: Array<String>) {
                 "holdout" -> traces.filter { it.recording.householdId in holdout }
                 else -> traces.filter { it.recording.householdId !in holdout }
             }
-            val thresholds = (2..20 step 2).map { it.toFloat() }
+            // dev sweeps ten thresholds and reports the best; holdout measures exactly the one
+            // pinned threshold chosen on dev — sweeping the holdout would be tuning on it.
+            val thresholds = pinnedThreshold?.let { listOf(it) } ?: (2..20 step 2).map { it.toFloat() }
             val outcomes = buildList {
                 addAll(Evaluation.sweep(evaluated, events, thresholds, "ALL"))
                 addAll(Evaluation.sweep(evaluated, events, thresholds, "ENGLISH") {
@@ -163,42 +196,29 @@ fun main(argv: Array<String>) {
             println("Wrote ${outDir.resolve("report.md")} and ${outDir.resolve("results.csv")}")
 
             println()
-            println(
-                "Best verdict per slice (ENGLISH and HEBREW must each clear the bar " +
-                    "independently — a system that passes ALL or one language and fails the other " +
-                    "has not passed):",
-            )
-            for (sliceLabel in listOf("ALL", "ENGLISH", "HEBREW", "CODE_SWITCHED")) {
-                val best = outcomes.filter { it.label == sliceLabel }.minByOrNull { it.verdict.rank }
-                println("  $sliceLabel: ${best?.verdict ?: "none"}")
+            if (mode == "holdout") {
+                println(
+                    "holdout measurement at threshold $pinnedThreshold — this is the number " +
+                        "(ENGLISH and HEBREW must each clear the bar independently — a system that " +
+                        "passes ALL or one language and fails the other has not passed):",
+                )
+                for (sliceLabel in listOf("ALL", "ENGLISH", "HEBREW", "CODE_SWITCHED")) {
+                    val outcome = outcomes.firstOrNull { it.label == sliceLabel }
+                    println("  $sliceLabel: ${outcome?.verdict ?: "none"}")
+                }
+            } else {
+                println(
+                    "dev sweep — best verdict per slice (an operating point chosen here must be " +
+                        "re-measured with --evaluate holdout --threshold N) (ENGLISH and HEBREW must " +
+                        "each clear the bar independently — a system that passes ALL or one language " +
+                        "and fails the other has not passed):",
+                )
+                for (sliceLabel in listOf("ALL", "ENGLISH", "HEBREW", "CODE_SWITCHED")) {
+                    val best = outcomes.filter { it.label == sliceLabel }.minByOrNull { it.verdict.rank }
+                    println("  $sliceLabel: ${best?.verdict ?: "none"}")
+                }
             }
         }
-    }
-}
-
-/**
- * An event whose path does not match a manifest row would be silently dropped by the replay
- * filter, lowering totalEvents and raising the detection rate. One pointing at a non-target
- * recording would let a false alarm be counted as a hit. Both corrupt the headline number quietly,
- * so both are fatal at load time.
- */
-private fun validateEvents(recordings: List<Recording>, events: List<CallEvent>) {
-    val byPath = recordings.associateBy { it.path }
-    val problems = events.mapNotNull { event ->
-        val recording = byPath[event.recordingPath]
-        when {
-            recording == null -> "${event.recordingPath}: no such recording in the manifest"
-            recording.role != RecordingRole.TARGET_CHILD ->
-                "${event.recordingPath}: events may only be labelled on target-child recordings, " +
-                    "but this is ${recording.role}"
-            recording.speakerId != event.targetSpeakerId ->
-                "${event.recordingPath}: event names speaker '${event.targetSpeakerId}' but the " +
-                    "recording is by '${recording.speakerId}'"
-            else -> null
-        }
-    }
-    require(problems.isEmpty()) {
-        "events.csv does not agree with recordings.csv:\n" + problems.joinToString("\n") { "  - $it" }
     }
 }
 
@@ -290,7 +310,7 @@ private fun traceOf(
 }
 
 private val KNOWN_FLAGS = setOf(
-    "help", "manifest", "models", "out", "holdout", "evaluate", "input-name", "output-name",
+    "help", "manifest", "models", "out", "holdout", "evaluate", "threshold", "input-name", "output-name",
 )
 
 internal fun parseArgs(argv: Array<String>): Map<String, String> {

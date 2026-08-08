@@ -4,6 +4,7 @@ import app.presence.domain.Language
 import app.presence.engine.MatchScore
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class EvaluationTest {
@@ -157,6 +158,64 @@ class EvaluationTest {
             outcomes.last().falseAlarms <= outcomes.first().falseAlarms,
             "false alarms must not increase as the threshold rises",
         )
+    }
+
+    // --- validateEvents ---
+
+    @Test
+    fun `an event pointing at a path missing from the manifest is rejected`() {
+        val recordings = listOf(recording("call.wav", RecordingRole.TARGET_CHILD, ContentType.CALLING))
+        val events = listOf(CallEvent("missing.wav", 0, "maya"))
+
+        val failure = assertFailsWith<IllegalArgumentException> { validateEvents(recordings, events) }
+        assertTrue(failure.message!!.contains("missing.wav"))
+    }
+
+    @Test
+    fun `an event on a non-target recording is rejected`() {
+        val recordings = listOf(
+            recording("sib.wav", RecordingRole.SIBLING, ContentType.SPONTANEOUS, "noam"),
+        )
+        val events = listOf(CallEvent("sib.wav", 0, "noam"))
+
+        val failure = assertFailsWith<IllegalArgumentException> { validateEvents(recordings, events) }
+        assertTrue(failure.message!!.contains("sib.wav"))
+    }
+
+    @Test
+    fun `an event whose speaker disagrees with the recording is rejected`() {
+        val recordings = listOf(
+            recording("call.wav", RecordingRole.TARGET_CHILD, ContentType.CALLING, speakerId = "maya"),
+        )
+        val events = listOf(CallEvent("call.wav", 0, "someone-else"))
+
+        val failure = assertFailsWith<IllegalArgumentException> { validateEvents(recordings, events) }
+        assertTrue(failure.message!!.contains("call.wav"))
+    }
+
+    @Test
+    fun `a consistent set of events and recordings passes cleanly`() {
+        val recordings = listOf(
+            recording("call.wav", RecordingRole.TARGET_CHILD, ContentType.CALLING, speakerId = "maya"),
+        )
+        val events = listOf(CallEvent("call.wav", 0, "maya"))
+
+        validateEvents(recordings, events) // must not throw
+    }
+
+    // --- I3: unlabelled target-child detections are false alarms ---
+
+    @Test
+    fun `a target-child trace that fires where no event is labelled counts as a false alarm`() {
+        val positive = recording("call.wav", RecordingRole.TARGET_CHILD, ContentType.CALLING)
+        val traces = listOf(trace(positive, 1_000L to 8f))
+
+        // No events at all — this trace's firing matches nothing.
+        val outcome = Evaluation.replay(traces, emptyList(), threshold = 6f, label = "ALL")
+
+        assertEquals(1, outcome.falseAlarms, "an unmatched detection on a target-child recording must count")
+        assertEquals(0, outcome.detectedEvents)
+        assertTrue(outcome.negativeHours > 0.0, "the target-child recording's hours must count as exposure")
     }
 
     // --- report ---
