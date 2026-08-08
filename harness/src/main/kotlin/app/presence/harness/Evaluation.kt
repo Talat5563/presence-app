@@ -59,31 +59,31 @@ object Evaluation {
         val selectedPaths = selected.map { it.recording.path }.toSet()
 
         val detections = ArrayList<Detection>()
-        var negativeSeconds = 0.0
-        var falseAlarms = 0
+        var exposureSeconds = 0.0
 
         for (trace in selected) {
             val accumulator = EvidenceAccumulator(AccumulatorConfig(fireThreshold = threshold))
-            // Role is known here, so a detection is classified where it is created rather than by
-            // a second lookup that duplicate paths could resolve to the wrong row.
-            val isTarget = trace.recording.role == RecordingRole.TARGET_CHILD
             for (observation in trace.observations) {
                 if (accumulator.accept(observation) != null) {
                     detections += Detection(trace.recording.path, observation.timestampMs)
-                    if (!isTarget) falseAlarms++
                 }
             }
-            if (!isTarget) negativeSeconds += trace.durationSeconds
+            exposureSeconds += trace.durationSeconds
         }
 
         val relevantEvents = events.filter { it.recordingPath in selectedPaths }
         val scoring = Metrics.scoreEvents(detections, relevantEvents)
+        // Every detection that matched no labelled event is a false alarm, wherever it fired.
+        // Exempting the target child's own recordings would hide the app interrupting a parent
+        // while the child plays happily alone — which is exactly a false alarm — and would also
+        // omit those hours from the denominator.
+        val falseAlarms = detections.size - scoring.detected
 
         return Outcome(
             label = label,
             fireThreshold = threshold,
             falseAlarms = falseAlarms,
-            negativeHours = negativeSeconds / 3_600.0,
+            negativeHours = exposureSeconds / 3_600.0,
             detectedEvents = scoring.detected,
             totalEvents = scoring.total,
             latenciesMs = scoring.latenciesMs,

@@ -23,8 +23,10 @@ data class EventScoring(
  *
  * @param label which slice: "ENGLISH", "HEBREW", "CODE_SWITCHED", or "ALL". Spec §4.3 requires
  *   every criterion to be reported separately per language, never pooled.
- * @param negativeHours hours of audio containing no target speech; the denominator for false
- *   alarms.
+ * @param negativeHours hours of audio in which a firing detection would count as a false alarm.
+ *   Since every detection that matches no labelled event is a false alarm regardless of whose
+ *   recording it fired in, that is all of it — including the target child's own recordings, so an
+ *   intervention while the child plays happily alone is not exempted.
  */
 data class Outcome(
     val label: String,
@@ -36,7 +38,7 @@ data class Outcome(
     val latenciesMs: List<Long>,
 ) {
     /**
-     * Hours of audio containing no target speech had a detection fired in them, per hour.
+     * False alarms per hour of [negativeHours] exposure.
      *
      * Zero when there is no negative audio at all — there is no rate to report.
      */
