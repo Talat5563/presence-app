@@ -105,7 +105,7 @@ fun main(argv: Array<String>) {
 
             for ((householdId, householdRecordings) in recordings.groupBy { it.householdId }) {
                 val split = Evaluation.splitCorpus(householdRecordings)
-                val profiles = enrolProfiles(split.enrollment, manifestDir, embedder, warnings)
+                val profiles = enrolProfiles(split.enrollment, manifestDir, vad, embedder, warnings)
                 val target = profiles.firstOrNull { it.role == VoiceProfile.Role.TARGET_CHILD }
                 if (target == null) {
                     val message = "SKIP household $householdId: no target child enrolled"
@@ -198,20 +198,40 @@ private fun validateEvents(recordings: List<Recording>, events: List<CallEvent>)
 private fun enrolProfiles(
     enrollment: List<Recording>,
     root: Path,
+    vad: SileroVad,
     embedder: SpeakerEmbedder,
     warnings: MutableList<String>,
 ): List<VoiceProfile> =
     enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
-        val clips = group.mapNotNull { recording ->
-            val language = recording.language ?: return@mapNotNull null
+        // Runtime observations are VAD-trimmed windows of at most 3 s each; embedding a whole
+        // unfiltered read passage in one shot would be a systematic mismatch that depresses
+        // targetSimilarity against the absolute minTargetSimilarity gate. Running enrollment audio
+        // through the same VadGate the runtime uses, and embedding per segment, keeps the two
+        // comparable.
+        val clips = group.flatMap { recording ->
+            val language = recording.language ?: return@flatMap emptyList()
             val samples = try {
                 WavReader.read(root.resolve(recording.path))
             } catch (failure: UnsupportedAudioException) {
                 warnings += "$speakerId: skipped ${recording.path} — ${failure.message}"
-                return@mapNotNull null
+                return@flatMap emptyList()
             }
-            if (samples.size < SAMPLE_RATE_HZ) return@mapNotNull null
-            EnrollmentClip(language, embedder.embed(samples), samples.size.toDouble() / SAMPLE_RATE_HZ)
+
+            vad.reset()
+            val vadGate = VadGate(vad)
+            val segments = buildList {
+                val framer = Framer(vad.frameSize)
+                for (frame in framer.push(samples)) vadGate.accept(frame)?.let { add(it) }
+                vadGate.flush()?.let { add(it) }
+            }
+
+            segments.filter { it.durationMs >= 800 }.map { segment ->
+                EnrollmentClip(
+                    language = language,
+                    embedding = embedder.embed(segment.samples),
+                    speechSeconds = segment.samples.size / SAMPLE_RATE_HZ.toDouble(),
+                )
+            }
         }
         if (clips.isEmpty()) {
             warnings += "$speakerId: no usable enrollment audio"
