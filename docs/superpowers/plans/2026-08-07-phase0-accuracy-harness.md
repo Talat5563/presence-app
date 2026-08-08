@@ -739,7 +739,7 @@ fun centroidOf(embeddings: List<Embedding>): Embedding {
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.EmbeddingTest"`
-Expected: PASS, 14 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -4468,6 +4468,14 @@ class ManifestTest {
         assertFailsWith<IllegalArgumentException> { Csv.parse("") }
     }
 
+    @Test
+    fun `rejects duplicate header columns rather than silently losing one`() {
+        val failure = assertFailsWith<IllegalArgumentException> { Csv.parse("a,b,a\n1,2,3\n") }
+
+        assertTrue(failure.message!!.contains("duplicate"), failure.message!!)
+        assertTrue(failure.message!!.contains("a"))
+    }
+
     // --- Recordings ---
 
     @Test
@@ -4557,6 +4565,29 @@ class ManifestTest {
         assertTrue(failure.message!!.contains("speaker_id"))
     }
 
+    @Test
+    fun `rejects a manifest with a header but no rows`() {
+        val file = tempFile("recordings.csv", "$recordingsHeader\n")
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("no data rows"), failure.message!!)
+    }
+
+    @Test
+    fun `a malformed number names the file and line`() {
+        val file = tempFile(
+            "recordings.csv",
+            "$recordingsHeader\n" +
+                "a.wav,h1,maya,target_child,hebrew,false,spontaneous,abc,table,quiet,kitchen,2026-08-01\n",
+        )
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("recordings.csv"), failure.message!!)
+        assertTrue(failure.message!!.contains("line 2"), failure.message!!)
+    }
+
     // --- Events ---
 
     @Test
@@ -4572,6 +4603,13 @@ class ManifestTest {
         assertEquals("audio/maya-01.wav", events[0].recordingPath)
         assertEquals(4200L, events[0].startMs)
         assertEquals("maya", events[0].targetSpeakerId)
+    }
+
+    @Test
+    fun `rejects an event with a blank speaker id`() {
+        val file = tempFile("events.csv", "recording_path,start_ms,target_speaker_id\na.wav,100,\n")
+
+        assertFailsWith<IllegalArgumentException> { Manifest.readEvents(file) }
     }
 
     @Test
@@ -4607,14 +4645,32 @@ package app.presence.harness
  */
 object Csv {
 
-    fun parse(text: String): List<Map<String, String>> {
+    fun parse(text: String): List<Map<String, String>> =
+        parseWithLineNumbers(text).map { it.second }
+
+    /**
+     * Same as [parse], but pairs each row with its 1-based line number in the source text, so a
+     * caller can name the line a human would find in their editor. `withIndex()` runs before the
+     * blank-line filter precisely so those numbers stay true to the file.
+     */
+    fun parseWithLineNumbers(text: String): List<Pair<Int, Map<String, String>>> {
         val lines = text.lineSequence()
             .withIndex()
             .filter { (_, line) -> line.isNotBlank() }
             .toList()
         require(lines.isNotEmpty()) { "CSV is empty: expected a header row" }
 
-        val header = splitRow(lines.first().value, lineNumber = lines.first().index + 1)
+        val headerLineNumber = lines.first().index + 1
+        val header = splitRow(lines.first().value, headerLineNumber)
+
+        // Duplicate names would make zip-to-map keep only the last value, losing a column with no
+        // error at all — the exact silent mis-parse this reader exists to prevent. A spreadsheet
+        // export with two identically-named columns is the realistic way this happens.
+        val duplicates = header.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        require(duplicates.isEmpty()) {
+            "line $headerLineNumber: duplicate column name(s) ${duplicates.joinToString()} — " +
+                "each column must be unique or data is silently lost"
+        }
 
         return lines.drop(1).map { (index, line) ->
             val lineNumber = index + 1
@@ -4622,7 +4678,7 @@ object Csv {
             require(fields.size == header.size) {
                 "line $lineNumber has ${fields.size} fields but the header has ${header.size}: $line"
             }
-            header.zip(fields).toMap()
+            lineNumber to header.zip(fields).toMap()
         }
     }
 
@@ -4700,7 +4756,11 @@ data class CallEvent(
     val startMs: Long,
     val targetSpeakerId: String,
 ) {
-    init { require(startMs >= 0) { "event start must not be negative, was $startMs" } }
+    init {
+        require(recordingPath.isNotBlank()) { "recordingPath must not be blank" }
+        require(targetSpeakerId.isNotBlank()) { "targetSpeakerId must not be blank" }
+        require(startMs >= 0) { "event start must not be negative, was $startMs" }
+    }
 }
 
 object Manifest {
@@ -4713,10 +4773,12 @@ object Manifest {
     private val REQUIRED_EVENT_COLUMNS = listOf("recording_path", "start_ms", "target_speaker_id")
 
     fun readRecordings(path: Path): List<Recording> {
-        val rows = Csv.parse(path.readText())
-        requireColumns(rows.first().keys, REQUIRED_RECORDING_COLUMNS, path)
+        val rows = Csv.parseWithLineNumbers(path.readText())
+        require(rows.isNotEmpty()) { "$path has a header but no data rows" }
+        requireColumns(rows.first().second.keys, REQUIRED_RECORDING_COLUMNS, path)
 
-        return rows.map { row ->
+        return rows.map { (lineNumber, row) ->
+            withRowContext(path, lineNumber) {
             Recording(
                 path = row.getValue("path"),
                 householdId = row.getValue("household_id"),
@@ -4732,21 +4794,40 @@ object Manifest {
                 room = row.getValue("room"),
                 date = row.getValue("date"),
             )
+            }
         }
     }
 
     fun readEvents(path: Path): List<CallEvent> {
-        val rows = Csv.parse(path.readText())
-        requireColumns(rows.first().keys, REQUIRED_EVENT_COLUMNS, path)
+        val rows = Csv.parseWithLineNumbers(path.readText())
+        require(rows.isNotEmpty()) { "$path has a header but no data rows" }
+        requireColumns(rows.first().second.keys, REQUIRED_EVENT_COLUMNS, path)
 
-        return rows.map { row ->
-            CallEvent(
-                recordingPath = row.getValue("recording_path"),
-                startMs = row.getValue("start_ms").toLong(),
-                targetSpeakerId = row.getValue("target_speaker_id"),
-            )
+        return rows.map { (lineNumber, row) ->
+            withRowContext(path, lineNumber) {
+                CallEvent(
+                    recordingPath = row.getValue("recording_path"),
+                    startMs = row.getValue("start_ms").toLong(),
+                    targetSpeakerId = row.getValue("target_speaker_id"),
+                )
+            }
         }
     }
+
+    /**
+     * Adds file and line context to any validation failure, so a bad row in a several-hundred-row
+     * manifest is findable. NumberFormatException extends IllegalArgumentException, so a malformed
+     * numeric field is covered too.
+     */
+    private inline fun <T> withRowContext(path: Path, lineNumber: Int, build: () -> T): T =
+        try {
+            build()
+        } catch (failure: IllegalArgumentException) {
+            throw IllegalArgumentException(
+                "${path.fileName}, line $lineNumber: ${failure.message}",
+                failure,
+            )
+        }
 
     private fun requireColumns(present: Set<String>, required: List<String>, path: Path) {
         val missing = required - present
@@ -4765,7 +4846,7 @@ object Manifest {
 - [ ] **Step 5: Run the test and verify it passes**
 
 Run: `./gradlew :harness:test --tests "app.presence.harness.ManifestTest"`
-Expected: PASS, 14 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 6: Commit**
 
