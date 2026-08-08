@@ -163,8 +163,16 @@ fun main(argv: Array<String>) {
             outDir.resolve("results.csv").writeText(Report.csv(outcomes))
             println("Wrote ${outDir.resolve("report.md")} and ${outDir.resolve("results.csv")}")
 
-            val best = outcomes.filter { it.label == "ALL" }.minByOrNull { it.verdict.rank }
-            println("Best overall verdict: ${best?.verdict ?: "none"}")
+            println()
+            println(
+                "Best verdict per slice (ENGLISH and HEBREW must each clear the bar " +
+                    "independently — a system that passes ALL or one language and fails the other " +
+                    "has not passed):",
+            )
+            for (sliceLabel in listOf("ALL", "ENGLISH", "HEBREW", "CODE_SWITCHED")) {
+                val best = outcomes.filter { it.label == sliceLabel }.minByOrNull { it.verdict.rank }
+                println("  $sliceLabel: ${best?.verdict ?: "none"}")
+            }
         }
     }
 }

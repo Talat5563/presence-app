@@ -25,13 +25,17 @@ object Report {
             }
             appendLine("## Results")
             appendLine()
-            appendLine("| Slice | Threshold | FA/hour | Detection | Miss rate | Median latency | Verdict |")
-            appendLine("|---|---:|---:|---:|---:|---:|---|")
+            appendLine(
+                "| Slice | Threshold | False alarms | Negative hours | FA/hour | Detection | " +
+                    "Total events | Miss rate | Median latency | Verdict |",
+            )
+            appendLine("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
             for (outcome in outcomes) {
                 appendLine(
-                    "| ${outcome.label} | ${format(outcome.fireThreshold)} | " +
-                        "${format(outcome.falseAlarmsPerHour)} | " +
-                        "${percent(outcome.detectionRate)} | ${percent(outcome.missRate)} | " +
+                    "| ${outcome.label} | ${format(outcome.fireThreshold)} | ${outcome.falseAlarms} | " +
+                        "${format(outcome.negativeHours)} | ${format(outcome.falseAlarmsPerHour)} | " +
+                        "${percent(outcome.detectionRate)} | ${outcome.totalEvents} | " +
+                        "${percent(outcome.missRate)} | " +
                         "${outcome.medianLatencyMs?.let { "$it ms" } ?: "—"} | ${outcome.verdict} |",
                 )
             }
