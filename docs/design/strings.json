@@ -1,0 +1,407 @@
+{
+  "$meta": {
+    "product": "Presence (working name)",
+    "locales": ["en", "he"],
+    "sourceLocale": "en",
+    "hebrewStatus": "PLACEHOLDER — NOT SHIPPING COPY",
+    "hebrewInstruction": "Every he value below is a placeholder written to size the layout, not to ship. Tone does not survive translation, and tone is this app's most fragile quality. A native Hebrew writer must rewrite every string carrying an `intent` note, reaching for the feeling described rather than translating the English. Strings without an `intent` note are mechanical and a good translator is sufficient.",
+    "rules": [
+      "NEVER concatenate. One localised sentence per key, with named placeholders, so the Hebrew writer controls word order.",
+      "Every {name} placeholder is rendered inside a bidi isolate (bdi) with its font stack resolved from the STRING's script, not the UI language.",
+      "The hedged form always wins. 'might be calling you' ships; 'is calling you' does not. The unhedged form is a lie roughly one time in five, and it is a lie the parent will personally catch.",
+      "Never claim certainty. Never present a confidence score or percentage.",
+      "Never count, estimate, hint at, or reserve space for missed moments. Detected moments may be shown.",
+      "No product name in any string except about.appName and the notification's app-name row."
+    ],
+    "toneGuardrails": {
+      "audience": "Parents who already feel bad about their phone use around their kids. They are not looking to be scolded, scored, or graded.",
+      "do": ["warm", "calm", "human", "unhurried", "neutral about missed moments"],
+      "never": ["clinical", "gamified", "corporate", "streaks", "scores", "guilt metrics", "'you failed' framing", "alarm urgency", "exclamation marks outside a child's own recorded speech"]
+    }
+  },
+
+  "overlay": {
+    "hedgedCall": {
+      "en": "{name} might be calling you",
+      "he": "{name} אולי קוראת לך",
+      "intent": "THE most important string in the product. A gentle tap on the shoulder from someone who loves you. Hedged, because it arrives several seconds late and is wrong about one time in five. Warmth must come from the typography and the child's face, NOT from promoting a guess to a fact. Hebrew: needs gender agreement on the verb per child — the data model carries the child's grammatical gender for this reason.",
+      "notes": "Rendered with the name in a bdi. Never present-tense-immediate ('right now'), which reads as broken when it lands eight seconds late."
+    },
+    "hedgedCallSecondChild": {
+      "en": "{name} might be calling you — and {other} may be there too",
+      "he": "{name} אולי קוראת לך — ואולי {other} שם גם",
+      "intent": "One face still leads. The second child is an addition, never a competing claim. Never 'someone is calling you'."
+    },
+    "blockReason": {
+      "en": "might be calling you. You asked me to stop you here.",
+      "he": "אולי קוראת לך. ביקשת שנעצור אותך כאן.",
+      "intent": "Reminds the parent that Block was their own decision, so the hard stop reads as self-kindness rather than punishment. Second person, quiet, no reproach."
+    },
+    "dismiss":        { "en": "Okay, thanks", "he": "תודה, הבנתי", "intent": "Grateful, not dismissive. The parent is being helped, not interrupted." },
+    "dismissBlock":   { "en": "Go to her", "he": "ללכת אליה", "intent": "The action the app actually wants. Warm, imperative, no friction. Gender-varies in Hebrew." },
+    "returnToPhone":  { "en": "Back to my phone", "he": "חזרה לטלפון", "intent": "No shame in this choice. Plain and neutral — Block never traps anyone." },
+    "notThem":        { "en": "That wasn't {name}", "he": "זו לא הייתה {name}", "intent": "An offered hand, never a bug report. The parent is doing the app a favour. No 'report', no 'incorrect', no 'wrong'." },
+    "notEither":      { "en": "Neither of them", "he": "אף אחת מהן", "intent": "Same register as notThem, for the multi-child overlay." },
+    "duckedNotice":   { "en": "Sound turned down", "he": "הצלילים הונמכו", "intent": "Factual, past tense — it already happened, so the parent isn't asked to do anything." },
+    "tapOutside":     { "en": "Tapping anywhere outside also closes this", "he": "אפשר גם ללחוץ מחוץ לחלון כדי לסגור" },
+    "blockNeverTraps":{ "en": "This always lets you back", "he": "אפשר לחזור מכאן תמיד" },
+    "a11yOverlay":    { "en": "{name} might be calling you. Photo of {name}. Two actions: dismiss, or tell us it wasn't {name}.", "he": "{name} אולי קוראת לך. תמונה של {name}. שתי אפשרויות: לסגור, או לומר לנו שזו לא הייתה {name}.", "notes": "Screen-reader label for the whole overlay, announced as an assertive live region." }
+  },
+
+  "home": {
+    "listeningFor":       { "en": "Listening for {name}", "he": "מקשיבה ל{name}", "intent": "Present, calm, specific. Names the child rather than describing a feature." },
+    "listeningForMany":   { "en": "Listening for {names}", "he": "מקשיבה ל{names}" },
+    "listeningUntil":     { "en": "Family time until {time}", "he": "זמן משפחה עד {time}" },
+    "listeningNoWindow":  { "en": "Whenever your screen is on", "he": "בכל פעם שהמסך שלך דלוק" },
+    "paused":             { "en": "Paused", "he": "מושהה", "intent": "One word. A deliberate choice by the parent, so it is completely neutral — never styled or worded as a problem." },
+    "pausedBody":         { "en": "Nothing is being heard. Turn it back on whenever you want to.", "he": "לא שומעים כלום. אפשר להדליק חזרה מתי שתרצה.", "intent": "No nagging, no 'don't forget'. The last clause returns control to the parent." },
+    "momentsToday":       { "en": "{count} moments with {name} today", "he": "{count} רגעים עם {name} היום", "intent": "Quietly reassuring — this is the app working. NEVER paired with a target, a streak, or a comparison to yesterday." },
+    "momentsTodayOne":    { "en": "1 moment with {name} today", "he": "רגע אחד עם {name} היום" },
+    "momentsTodayNone":   { "en": "No moments yet today", "he": "עדיין לא היו רגעים היום", "intent": "Utterly unremarkable. A zero-count day is a normal state, not an empty state. No illustration, no encouragement, no 'let's change that'." },
+    "oneLanguageStanding":{ "en": "Listening in English only — we may miss {name} in Hebrew", "he": "מקשיבה באנגלית בלבד — אולי נפספס את {name} בעברית", "intent": "A standing fact stated calmly, once. Not a warning, not a badge, not amber. The worst outcome this app can produce is a parent who believes they're covered in both languages and isn't." },
+    "addLanguage":        { "en": "Add Hebrew", "he": "להוסיף אנגלית", "notes": "The missing language is interpolated at runtime — this key exists per-language, not as a template with a language name in it." },
+    "notListening":       { "en": "Not listening", "he": "לא מקשיבה", "intent": "Blunt and plain. The app never claims to be listening when it is not — this outranks every aesthetic preference." },
+    "nothingToListenFor": { "en": "There's nothing to listen for until then", "he": "עד אז אין למי להקשיב" }
+  },
+
+  "notification": {
+    "channelOngoingName":  { "en": "Listening", "he": "הקשבה" },
+    "channelDegradedName": { "en": "Something needs your attention", "he": "משהו דורש את תשומת ליבך" },
+    "ongoingTitle":        { "en": "Listening for {names}", "he": "מקשיבה ל{names}" },
+    "ongoingBody":         { "en": "Nothing is being recorded or saved. Until {time}.", "he": "לא מקליטים ולא שומרים כלום. עד {time}.", "intent": "This row sits in the shade next to the parent's messages all day. Its job is reassurance, so the privacy promise leads." },
+    "ongoingBodyNoWindow": { "en": "Nothing is being recorded or saved.", "he": "לא מקליטים ולא שומרים כלום." },
+    "pauseHour":           { "en": "Pause for an hour", "he": "להשהות לשעה" },
+    "turnOff":             { "en": "Turn off", "he": "לכבות" },
+    "statusListening":     { "en": "Listening", "he": "מקשיבה" },
+    "statusNotListening":  { "en": "Not listening", "he": "לא מקשיבה" },
+    "degradedTitle":       { "en": "Presence has stopped listening", "he": "האפליקציה הפסיקה להקשיב", "intent": "For a parent who rarely opens the app, this shade row may be the ONLY place they'd learn it broke. So this is the one notification allowed to make a sound, once, and to re-sort to the top." },
+    "degradedBatteryBody": { "en": "Your phone's battery saver closed it at {time}. It won't restart on its own.", "he": "מנהל הסוללה של הטלפון סגר אותה ב{time}. היא לא תופעל שוב לבד.", "intent": "Blames the phone, never the parent. States plainly that it will NOT self-heal, so nobody trusts a silent broken app." },
+    "degradedMicBody":     { "en": "Microphone access was turned off at {time}.", "he": "הגישה למיקרופון כובתה ב{time}." },
+    "startAgain":          { "en": "Start again", "he": "להתחיל שוב" },
+    "stopThisHappening":   { "en": "Stop this happening", "he": "למנוע את זה בעתיד" },
+    "interventionTitle":   { "en": "{name} might be calling you", "he": "{name} אולי קוראת לך", "notes": "Reuses overlay.hedgedCall verbatim. Same string, same hedge, on every surface." }
+  },
+
+  "onboarding": {
+    "welcomeHeadline": { "en": "You don't always hear them the first time.", "he": "לא תמיד שומעים אותם בפעם הראשונה.", "intent": "Opens on the parent's experience, not the feature, and names the failure without blame — 'don't always' rather than 'ignore'. Must contain no product name and make sense under any rename." },
+    "welcomeBody1":    { "en": "Nobody does. You're reading something, and your child says your name, and it just doesn't land.", "he": "זה קורה לכולם. אתה קורא משהו, הילד שלך אומר את שמך, וזה פשוט לא נכנס.", "intent": "'Nobody does' is load-bearing — it absolves before the app asks for anything. Concrete and ordinary, never clinical." },
+    "welcomeBody2":    { "en": "This app learns their voice, and when it hears them it quietly turns your phone down and puts their face in front of you.", "he": "האפליקציה לומדת את הקול שלהם, וכשהיא שומעת אותם היא מנמיכה את הטלפון בשקט ומראה לך את הפנים שלהם." },
+    "welcomeCta":      { "en": "Let's set it up", "he": "בוא נתחיל" },
+    "welcomePrivacy":  { "en": "How it handles your family's privacy", "he": "איך זה מטפל בפרטיות של המשפחה שלך" },
+
+    "privacyTitleAndroid": { "en": "Everything stays on this phone", "he": "הכול נשאר בטלפון הזה" },
+    "privacyTitleIOS":     { "en": "Everything stays on this iPhone", "he": "הכול נשאר באייפון הזה" },
+    "privacyNoAccount":    { "en": "No account, no cloud, no upload. Nowhere for your family's voices to go.", "he": "אין חשבון, אין ענן, אין העלאה. אין לאן שהקולות של המשפחה שלך יוכלו לזלוג." },
+    "privacyNotRecording": { "en": "While it's listening, nothing is recorded. Sound is checked as it arrives, then gone.", "he": "בזמן ההקשבה שום דבר לא מוקלט. הצליל נבדק כשהוא מגיע, ואז נעלם." },
+    "privacyEnrollmentDoes": { "en": "Setting up really does record. Those clips build a voice profile, then are deleted — unless you keep them.", "he": "ההתקנה כן מקליטה. הקטעים בונים פרופיל קולי ואז נמחקים — אלא אם תבחר לשמור אותם.", "intent": "CRITICAL for trust. A blanket 'nothing is ever recorded' is a promise the very next flow visibly breaks, and a parent who catches you at it stops believing the rest of the screen. Both halves, in the same breath, no hedging." },
+    "privacyMicOffScreenOff": { "en": "The microphone is off whenever your screen is off. Android won't allow otherwise.", "he": "המיקרופון כבוי בכל פעם שהמסך כבוי. אנדרואיד לא מאפשר אחרת.", "notes": "ANDROID ONLY. Must never appear on iOS in any form." },
+    "privacyGreenDot":     { "en": "A small green dot appears at the top of your screen while it listens. That's Android, not us, and it can't be turned off.", "he": "נקודה ירוקה קטנה מופיעה בראש המסך בזמן ההקשבה. זה של אנדרואיד, לא שלנו, ואי אפשר לכבות אותה.", "intent": "Names the thing the parent will notice anyway, before they notice it and wonder. 'not us' and 'can't be turned off' are both necessary." },
+    "privacyOrangeDot":    { "en": "An orange dot shows while the microphone is on. That's iPhone, not us.", "he": "נקודה כתומה מופיעה כשהמיקרופון דלוק. זה של אייפון, לא שלנו." },
+    "privacyIOSNoUsageDetection": { "en": "iPhone can't tell when you're using it", "he": "אייפון לא יכול לדעת מתי אתה משתמש בו" },
+    "privacyIOSScheduleReason":   { "en": "iOS gives no app the \"stop when the screen is off\" rule Android has. So you decide the hours.", "he": "iOS לא נותן לאף אפליקציה את הכלל של אנדרואיד. לכן אתה קובע את השעות.", "intent": "An iOS parent must be shown the iOS truth, not the Android promise with a footnote. Frames the schedule as the parent's agency rather than the platform's failure." },
+    "privacyAck":          { "en": "Got it", "he": "הבנתי" },
+
+    "permMicTitle":  { "en": "It needs to hear the room", "he": "היא צריכה לשמוע את החדר" },
+    "permMicBody":   { "en": "That's the whole trick: it listens for your child's voice and nothing else. Sound is checked as it arrives and thrown away instantly.", "he": "זה כל הסיפור: היא מקשיבה לקול של הילד שלך ולשום דבר אחר. הצליל נבדק ונזרק מיד." },
+    "permMicChoose": { "en": "Android will ask you next. Choose While using the app — it's enough.", "he": "אנדרואיד ישאל אותך עכשיו. בחר \"בזמן שימוש באפליקציה\" — זה מספיק.", "intent": "Names the option to pick BEFORE the unstyleable system dialog appears, so the parent isn't guessing inside someone else's UI." },
+    "permMicCta":    { "en": "Ask me now", "he": "לשאול אותי עכשיו" },
+    "permNotYet":    { "en": "Not yet", "he": "עוד לא" },
+
+    "permNotifTitle":     { "en": "Two kinds of notification", "he": "שני סוגי התראות" },
+    "permNotifQuietName": { "en": "A quiet one that stays", "he": "אחת שקטה שנשארת" },
+    "permNotifQuietBody": { "en": "Android requires it while any app listens. It's silent, and it's how you pause without opening anything.", "he": "אנדרואיד דורש אותה בזמן שאפליקציה מקשיבה. היא שקטה, וממנה אפשר להשהות בלי לפתוח כלום.", "intent": "Turns a platform obligation into a benefit rather than apologising for it." },
+    "permNotifFaceName":  { "en": "Their face, when they call", "he": "הפנים שלהם, כשהם קוראים" },
+    "permNotifFaceBody":  { "en": "If you'd rather nothing covered your screen, this is the whole reminder.", "he": "אם אתה מעדיף ששום דבר לא יכסה את המסך, זו כל התזכורת." },
+    "permNotifCta":       { "en": "Allow notifications", "he": "לאשר התראות" },
+
+    "permOverlayTitle": { "en": "To dim your screen, it needs one more thing", "he": "כדי להחשיך את המסך צריך עוד דבר אחד" },
+    "permOverlayBody":  { "en": "Android calls it \"Display over other apps\". It's what lets {name}'s face appear over whatever you're in — otherwise you'd only get a notification.", "he": "אנדרואיד קורא לזה \"הצגה מעל אפליקציות אחרות\". זה מה שמאפשר לפנים של {name} להופיע מעל מה שאתה עושה — אחרת תקבל רק התראה." },
+    "permOverlayLookFor": { "en": "You'll land in Settings. Look for:", "he": "תגיע להגדרות. חפש:" },
+    "permOverlayFindUs":  { "en": "Find us in the list and turn the switch on. Then come straight back.", "he": "מצא אותנו ברשימה והדלק את המתג. ואז חזור לכאן." },
+    "permOverlayCta":     { "en": "Take me there", "he": "קח אותי לשם" },
+    "permOverlayDecline": { "en": "A notification is fine", "he": "התראה זה בסדר", "intent": "Declining is a real, named, dignified choice — not a dead end. It lands the parent on Notify rather than a broken response." },
+
+    "permBatteryTitle":  { "en": "Your phone keeps closing it", "he": "הטלפון שלך ממשיך לסגור אותה" },
+    "permBatteryBody":   { "en": "{count} times this week. {manufacturer}'s battery saver does this to background apps. Letting us out of it fixes it for good.", "he": "{count} פעמים השבוע. מנהל הסוללה של {manufacturer} עושה את זה לאפליקציות ברקע. פטור ממנו יפתור את זה סופית.", "intent": "Only ever shown after the service has ACTUALLY been killed, with the real count and the real manufacturer. Blames the phone." },
+    "permBatteryVaries": { "en": "Every phone names this screen differently, so look for something like this:", "he": "כל טלפון קורא למסך הזה אחרת, אז חפש משהו כזה:", "intent": "The destination is named differently on every manufacturer's phone, so we SHOW the parent what to look for rather than promise a label we cannot guarantee." },
+    "permBatteryPickThis": { "en": "Pick this one", "he": "בחר את זה" },
+    "permBatteryWordingDiffers": { "en": "The wording on your phone may differ. Anything meaning \"don't restrict this app\" is right.", "he": "הניסוח בטלפון שלך עשוי להיות שונה. כל דבר שמשמעותו \"אל תגביל את האפליקציה\" מתאים." },
+    "permBatteryCta":    { "en": "Open my battery settings", "he": "לפתוח את הגדרות הסוללה" },
+    "permNotNow":        { "en": "Not now", "he": "לא עכשיו" },
+
+    "returnVerifiedTitle": { "en": "That worked", "he": "זה עבד" },
+    "returnVerifiedBody":  { "en": "{name}'s face can appear over other apps now. Your response is set to soften.", "he": "הפנים של {name} יכולות להופיע מעל אפליקציות אחרות. התגובה מוגדרת ל\"ריכוך\"." },
+    "returnFailedTitle":   { "en": "Still switched off", "he": "עדיין כבוי" },
+    "returnFailedBody":    { "en": "We checked, and the permission isn't on yet. It's easy to miss in that list — we can take you back to the same place.", "he": "בדקנו, וההרשאה עדיין לא דלוקה. קל לפספס אותה ברשימה — אפשר לחזור לאותו מקום.", "intent": "The app VERIFIES rather than assumes, and when it failed it blames the list, not the parent. 'It's easy to miss' does the whole job." },
+    "returnTryAgain":      { "en": "Try again", "he": "לנסות שוב" },
+    "returnUseNotification": { "en": "Use a notification instead", "he": "להשתמש בהתראה במקום" },
+    "returnCarryOn":       { "en": "Carry on", "he": "להמשיך" }
+  },
+
+  "addChild": {
+    "title":       { "en": "Who are we listening for?", "he": "למי אנחנו מקשיבים?" },
+    "photoPrompt": { "en": "Pick a photo you love. This is the face you'll see when they call you.", "he": "בחר תמונה שאתה אוהב. אלה הפנים שתראה כשהם יקראו לך.", "intent": "Makes choosing the photo feel meaningful rather than like filling a form field. The photo is the emotional centre of the entire product." },
+    "photoEmpty":  { "en": "Choose or take a photo", "he": "לבחור או לצלם תמונה" },
+    "fromPhotos":  { "en": "Photos", "he": "תמונות" },
+    "fromCamera":  { "en": "Camera", "he": "מצלמה" },
+    "nameLabel":   { "en": "What do you call them?", "he": "איך אתה קורא להם?", "intent": "Not 'Name'. Asks for the household's real word, which is what will appear on the reminder." },
+    "nameHelp":    { "en": "Whatever you call them at home — that's the name on the reminder.", "he": "איך שאתה קורא להם בבית — זה השם שיופיע בתזכורת." },
+    "next":        { "en": "Next", "he": "הלאה" }
+  },
+
+  "enrollMode": {
+    "titleTarget":    { "en": "Now let's learn {name}'s voice", "he": "עכשיו נלמד את הקול של {name}" },
+    "subtitleTarget": { "en": "Either way works. About a minute of her talking is all it takes.", "he": "שתי הדרכים עובדות. בערך דקה של דיבור שלה זה כל מה שצריך." },
+    "recordName":     { "en": "Record together", "he": "להקליט ביחד", "intent": "'Together' is the whole framing — this is something a parent and child do side by side, not a task performed on a child." },
+    "recordBody":     { "en": "A few short things to say, side by side with her. Most children find it funny, and you can stop any time.", "he": "כמה דברים קצרים להגיד, ביחד איתה. רוב הילדים נהנים מזה, ואפשר להפסיק בכל רגע." },
+    "importName":     { "en": "Use videos you already have", "he": "להשתמש בסרטונים שיש לך" },
+    "importBody":     { "en": "Home videos or voice notes with her talking. You'll confirm which bits are her.", "he": "סרטונים מהבית או הקלטות קוליות שהיא מדברת בהם. תאשר אילו קטעים הם שלה." },
+    "tagBothLanguages":{ "en": "Hebrew and English", "he": "עברית ואנגלית" },
+    "tagDuration":    { "en": "2–4 minutes", "he": "2–4 דקות" },
+    "tagStaysOnPhone":{ "en": "Stays on the phone", "he": "נשאר בטלפון" },
+    "tagNothingToRecord": { "en": "Nothing to record", "he": "אין מה להקליט" },
+
+    "titleNonTarget":  { "en": "Adding {name} — the quick version", "he": "מוסיפים את {name} — הגרסה המהירה", "intent": "'The quick version' in the title is the reduction made visible at first glance, before any body copy." },
+    "nonTargetRelaxations": { "en": "This one's much lighter than {target}'s. Half the talking, one language, and we're not fussy about the quality. It only has to be good enough to tell you apart from her.", "he": "זה הרבה יותר קל מזה של {target}. חצי מהדיבור, שפה אחת, ואנחנו לא קפדנים לגבי האיכות. זה רק צריך להיות טוב מספיק כדי להבדיל בינך לבינה.", "intent": "Says all three relaxations OUT LOUD. A parent left guessing whether they cut a corner will either over-invest or quit. 'Not fussy about the quality' must survive any rewrite." },
+    "nonTargetImportName": { "en": "Use something you already have", "he": "להשתמש במשהו שיש לך" },
+    "nonTargetImportBody": { "en": "Any video or voice note with you talking. Easiest by far — most people are done in under a minute.", "he": "כל סרטון או הקלטה שאתה מדבר בהם. הדרך הקלה — רוב האנשים מסיימים בפחות מדקה." },
+    "nonTargetRecordName": { "en": "Read a couple of lines", "he": "לקרוא כמה שורות" },
+    "nonTargetRecordBody": { "en": "Thirty seconds of normal talking. No prompts to get right.", "he": "שלושים שניות של דיבור רגיל. אין מה לעשות נכון." },
+    "tagThirtySeconds":    { "en": "30 seconds", "he": "30 שניות" },
+    "tagOneLanguageFine":  { "en": "One language is fine", "he": "שפה אחת מספיקה" }
+  },
+
+  "enrollSession": {
+    "pauseAndResume": { "en": "Pause & finish later", "he": "להשהות ולסיים אחר כך", "intent": "Always visible in the corner. A one-minute attention span is optimistic for a five-year-old, and this is asking for two languages' worth." },
+    "sayThisIn":      { "en": "Say this in {language} · {index} of {total}", "he": "תגיד את זה ב{language} · {index} מתוך {total}" },
+    "clipGood":       { "en": "That one was good — {seconds} seconds", "he": "זה היה טוב — {seconds} שניות", "intent": "Immediate, warm, and counts in the SAME currency as the progress bar." },
+    "tryAgain":       { "en": "Try again", "he": "לנסות שוב" },
+    "nextPrompt":     { "en": "Next", "he": "הלאה" },
+    "progressPerLanguage": { "en": "{collected} of {target} seconds", "he": "{collected} מתוך {target} שניות", "intent": "ALWAYS seconds of usable speech, per language — never 'clips recorded'. Short clips are near-worthless to the recognizer, so a '4 of 6 clips' bar would actively mislead." },
+    "languageComplete":    { "en": "enough collected", "he": "נאסף מספיק" },
+    "languageStillShort":  { "en": "still short", "he": "עדיין חסר" },
+    "languageNearlyThere": { "en": "nearly there", "he": "כמעט שם" },
+
+    "calloutLabel":   { "en": "The important one", "he": "החשוב מכולם" },
+    "calloutPrompt":  { "en": "{name}, call me the way you always do", "he": "{name}, קראי לי כמו שאת תמיד קוראת", "intent": "Spoken TO THE CHILD, by name — this is the most valuable recording in the whole session and the most natural thing to ask for, so it gets its own screen rather than being buried in a word list." },
+    "calloutBody":    { "en": "Just shout for me, a few times, however it comes out. This is the one that matters most.", "he": "פשוט תקראי לי, כמה פעמים, איך שיוצא. זה מה שהכי חשוב." },
+    "calloutProgress":{ "en": "{done} of {total} · keep going", "he": "{done} מתוך {total} · תמשיכו" },
+
+    "oneLanguageExit":       { "en": "We only speak one language at home", "he": "אנחנו מדברים רק שפה אחת בבית", "intent": "A monolingual household MUST be able to finish. Without this exit the flow cannot end for them, which is a bug, not a nudge. Worded as a statement of their life, not a shortcut they're taking." },
+    "oneLanguageExitTitle":  { "en": "Then we'll stop here", "he": "אז נעצור כאן" },
+    "oneLanguageExitBody":   { "en": "{language} is all we've got for {name}, and that's genuinely fine — she's ready.", "he": "{language} זה כל מה שיש לנו ל{name}, וזה באמת בסדר — היא מוכנה.", "intent": "'Genuinely fine' does real work — no drama, no warning triangle, no implication the parent has under-delivered." },
+    "oneLanguageExitCaveat": { "en": "One thing to know: if she calls you in {other}, we probably won't notice. You'll see that noted on her profile, and you can add {other} any time in about a minute.", "he": "דבר אחד שכדאי לדעת: אם היא תקרא לך ב{other}, כנראה לא נשים לב. זה יופיע בפרופיל שלה, ואפשר להוסיף {other} מתי שתרצה, בערך דקה.", "intent": "Stated once, calmly, without alarm — and NOT as a dismissible tooltip. This creates a standing fact on the profile visible on the roster, home, and manage-household, because the worst outcome is a parent who believes they're covered in both and isn't." },
+    "oneLanguageConfirm":    { "en": "That's right, we're done", "he": "נכון, סיימנו" },
+    "oneLanguageReconsider": { "en": "Actually, let's do {other} too", "he": "בעצם, בוא נעשה {other} גם" }
+  },
+
+  "enrollImport": {
+    "title":        { "en": "Which of these is {name}?", "he": "מי מאלה {name}?" },
+    "subtitle":     { "en": "From {count} videos. Tap to listen, then keep or drop.", "he": "מ{count} סרטונים. הקש להשמעה, ואז שמור או השלך." },
+    "segmentRange": { "en": "{start} – {end}", "he": "{start} – {end}" },
+    "keep":         { "en": "Keep", "he": "לשמור" },
+    "drop":         { "en": "Drop", "he": "להשליך" },
+    "droppedAdult": { "en": "Dropped — that's an adult voice", "he": "הושלך — זה קול של מבוגר" },
+    "undo":         { "en": "Undo", "he": "לבטל" },
+    "addAnother":   { "en": "Add another video", "he": "להוסיף עוד סרטון" }
+  },
+
+  "enrollQuality": {
+    "title":            { "en": "How it's going", "he": "איך זה מתקדם", "intent": "Not 'Results', not 'Quality report'. Conversational, mid-process, no verdict implied." },
+    "rejectedHeading":  { "en": "{count} we couldn't use", "he": "{count} שלא הצלחנו להשתמש בהם", "intent": "'We couldn't use' — the app's limitation, not the child's failure. Never 'failed clips'." },
+    "reasonOverlap":       { "en": "Someone was talking over her", "he": "מישהו דיבר עליה" },
+    "reasonOverlapFix":    { "en": "We need her voice on its own. Try letting her finish before you answer.", "he": "אנחנו צריכים את הקול שלה לבד. נסה לתת לה לסיים לפני שאתה עונה." },
+    "reasonNoise":         { "en": "Too much going on behind her", "he": "יותר מדי רעש מאחוריה" },
+    "reasonNoiseFix":      { "en": "The TV or a fan, probably. Somewhere quieter would help.", "he": "טלוויזיה או מאוורר, כנראה. מקום שקט יותר יעזור." },
+    "reasonNoSpeech":      { "en": "She didn't say anything that time", "he": "היא לא אמרה כלום הפעם" },
+    "reasonNoSpeechFix":   { "en": "No harm done — nothing was lost.", "he": "לא נגרם נזק — שום דבר לא אבד.", "intent": "Every rejection reassures that progress did not go backwards. Bars only ever go up." },
+    "reasonClipping":      { "en": "That came out too loud to read", "he": "זה יצא חזק מדי" },
+    "reasonClippingFix":   { "en": "A little further from the phone should do it.", "he": "קצת יותר רחוק מהטלפון יעזור." },
+    "carryOnIn":        { "en": "Carry on in {language}", "he": "להמשיך ב{language}" },
+    "finishLater":      { "en": "Finish later — nothing will be lost", "he": "לסיים אחר כך — שום דבר לא יאבד", "intent": "Designed for interruption and partial completion. The reassurance is inside the label so it can't be missed." },
+
+    "allRejectedTitle": { "en": "That room was too noisy for us", "he": "החדר הזה היה רועש מדי בשבילנו", "intent": "The room is the subject, not the child and not the parent." },
+    "allRejectedBody":  { "en": "Nothing from that session was usable — that's on us, not on {name}. Here's what we heard:", "he": "שום דבר מהמפגש לא היה שמיש — זה עלינו, לא על {name}. הנה מה ששמענו:", "intent": "LOAD-BEARING. The parent has just failed at this in front of their child. 'That's on us' must survive any rewrite." },
+    "allRejectedWaysForward": { "en": "Two ways forward", "he": "שתי דרכים להמשיך", "intent": "A parent who has just failed needs an exit, not a bare retry button." },
+    "allRejectedImportName": { "en": "Use a video instead", "he": "להשתמש בסרטון במקום" },
+    "allRejectedImportBody": { "en": "Any clip of her talking. Often better audio than a live room.", "he": "כל קטע שהיא מדברת בו. לרוב איכות טובה יותר מחדר חי." },
+    "allRejectedQuietName":  { "en": "Try again somewhere quiet", "he": "לנסות שוב במקום שקט" },
+    "allRejectedQuietBody":  { "en": "A bedroom with the door shut works well.", "he": "חדר שינה עם דלת סגורה עובד טוב." }
+  },
+
+  "enrollComplete": {
+    "title":        { "en": "We'll know her voice now", "he": "נזהה את הקול שלה עכשיו", "intent": "A warm payoff, not a checkmark on a form. Present-future, quietly confident, no celebration graphics." },
+    "bodyBoth":     { "en": "Hebrew and English both. When she calls you, you'll see this face.", "he": "גם עברית וגם אנגלית. כשהיא תקרא לך, תראה את הפנים האלה." },
+    "bodyOne":      { "en": "{language} only. When she calls you in {language}, you'll see this face.", "he": "{language} בלבד. כשהיא תקרא לך ב{language}, תראה את הפנים האלה." },
+    "collected":    { "en": "{duration} of her talking", "he": "{duration} של דיבור שלה" },
+    "keepAskTitle": { "en": "One question before we tidy up", "he": "שאלה אחת לפני שאנחנו מסדרים" },
+    "keepAskBody":  { "en": "Keep her recordings, and a top-up in a year builds on this session instead of starting over. Delete them, and only the voice profile remains.", "he": "אם תשמור את ההקלטות, חידוש בעוד שנה יתבסס על המפגש הזה במקום להתחיל מאפס. אם תמחק, יישאר רק הפרופיל הקולי.", "intent": "Asked ONCE, in plain words, with the actual trade stated both ways. Default is delete. Ask; don't assume." },
+    "keepToggle":   { "en": "Keep {name}'s recordings", "he": "לשמור את ההקלטות של {name}" },
+    "keepOffState": { "en": "Off — they'll be deleted", "he": "כבוי — הן יימחקו" },
+    "keepOnState":  { "en": "On — a top-up builds on them", "he": "דלוק — חידוש יתבסס עליהן" },
+    "ctaHousehold": { "en": "Now let's add everyone else", "he": "עכשיו נוסיף את כל השאר" }
+  },
+
+  "household": {
+    "whyTitle":     { "en": "Now record yourself, and her brother", "he": "עכשיו הקלט את עצמך, ואת אחיה" },
+    "whyBody1":     { "en": "It's how we learn to tell them apart. Siblings sound alike, and your own voice is the one the phone hears most.", "he": "כך אנחנו לומדים להבדיל ביניהם. אחים נשמעים דומה, והקול שלך הוא זה שהטלפון שומע הכי הרבה.", "intent": "The honest reason in the parent's terms, not the engineer's. A parent who understands the reason will do it; one asked with no stated reason will quit." },
+    "whyBody2":     { "en": "Knowing who isn't {name} is most of how we know when she is.", "he": "לדעת מי זו לא {name} זה רוב הדרך לדעת מתי זו כן היא.", "intent": "The single clearest sentence in the flow. Explains subtraction without a word of jargon." },
+    "whyLighterHeading": { "en": "These are much lighter than {name}'s:", "he": "אלה קלים בהרבה מזה של {name}:" },
+    "whyLighterTime":    { "en": "About 30 seconds each", "he": "בערך 30 שניות כל אחד" },
+    "whyLighterLang":    { "en": "One language is fine", "he": "שפה אחת מספיקה" },
+    "whyLighterImport":  { "en": "An old video works — good enough is good enough", "he": "סרטון ישן מתאים — טוב מספיק זה טוב מספיק" },
+    "whyCta":       { "en": "Start with me", "he": "להתחיל איתי" },
+    "whyDefer":     { "en": "Later — I'll do it tonight", "he": "אחר כך — אעשה את זה הערב" },
+
+    "rosterTitle":       { "en": "Who's in the house", "he": "מי יש בבית" },
+    "rosterProgress":    { "en": "{done} of {total}", "he": "{done} מתוך {total}" },
+    "rosterSectionTargets":   { "en": "Listening for", "he": "מקשיבים ל" },
+    "rosterSectionOthers":    { "en": "So we can tell them apart", "he": "כדי שנוכל להבדיל ביניהם" },
+    "rosterOthersSubhead":    { "en": "Shorter sessions. One language. Importing is fine.", "he": "מפגשים קצרים. שפה אחת. ייבוא זה בסדר." },
+    "rosterReady":            { "en": "Ready · {languages}", "he": "מוכן · {languages}" },
+    "rosterDone":             { "en": "Done · {duration}", "he": "הושלם · {duration}" },
+    "rosterAddPerson":        { "en": "Add {name}", "he": "להוסיף את {name}" },
+    "rosterAddHint":          { "en": "30 seconds, or use a video", "he": "30 שניות, או סרטון" },
+    "rosterStartAnyway":      { "en": "Start listening with what we have", "he": "להתחיל להקשיב עם מה שיש" },
+
+    "manageTitle":       { "en": "Household", "he": "בית" },
+    "manageSectionOthers": { "en": "Voices we subtract", "he": "קולות שאנחנו מחסירים", "intent": "Names the non-targets by their function rather than as leftovers or 'others'. On the ongoing screen this is a description, not a to-do." },
+    "manageProfileSummary": { "en": "{languages} · {clipState}", "he": "{languages} · {clipState}" },
+    "clipsKept":         { "en": "recordings kept", "he": "ההקלטות נשמרו" },
+    "clipsDeleted":      { "en": "recordings deleted", "he": "ההקלטות נמחקו" },
+    "staleNote":         { "en": "Her voice has changed since {month}.", "he": "הקול שלה השתנה מאז {month}." },
+    "topUpAdditive":     { "en": "Top up — nothing is replaced", "he": "לחדש — שום דבר לא מוחלף", "intent": "The additive promise is written ON THE CONTROL ITSELF. Fear of erasing what already works is exactly what stops people re-enrolling." },
+    "oneLanguageNote":   { "en": "We may miss her if she calls you in {other}.", "he": "אולי נפספס אותה אם היא תקרא לך ב{other}." },
+    "addSomeone":        { "en": "Add someone", "he": "להוסיף מישהו" },
+    "editPerson":        { "en": "Edit", "he": "לערוך" },
+    "disablePerson":     { "en": "Stop listening for {name}", "he": "להפסיק להקשיב ל{name}" },
+    "deletePerson":      { "en": "Delete {name}'s profile", "he": "למחוק את הפרופיל של {name}" },
+
+    "reenrollTitle":     { "en": "{name} sounds different than she did", "he": "{name} נשמעת אחרת ממה שהייתה", "intent": "About HER growing, not about the app failing or the parent neglecting it. Surfaces staleness BEFORE accuracy visibly decays." },
+    "reenrollBody":      { "en": "She's {age}, and her voice is changing fastest right now. {months} months on, we're working from an old picture of it.", "he": "היא בת {age}, והקול שלה משתנה עכשיו הכי מהר. {months} חודשים אחרי, אנחנו עובדים מתמונה מיושנת שלו.", "intent": "'Her voice is changing fastest right now' — younger children come round more often, and this must read as a fact about her development, never as the app pestering." },
+    "reenrollAdditive":  { "en": "Nothing you've built is lost. A new session is added to what she already has.", "he": "שום דבר שבנית לא נאבד. מפגש חדש מתווסף למה שכבר יש לה.", "intent": "Gets its own card. A parent who fears wiping two years of learning will not press the button." },
+    "reenrollOlderNote": { "en": "Older children come round far less often. {name}'s is good for another year.", "he": "ילדים גדולים חוזרים לכאן הרבה פחות. זה של {name} טוב לעוד שנה." },
+    "reenrollCta":       { "en": "Top up her profile · {duration}", "he": "לחדש את הפרופיל שלה · {duration}" },
+    "reenrollDefer":     { "en": "Remind me next week", "he": "להזכיר לי בשבוע הבא" }
+  },
+
+  "response": {
+    "title":         { "en": "When {name} calls", "he": "כש{name} קוראת" },
+    "presetNotify":  { "en": "Notify", "he": "התראה" },
+    "presetSoften":  { "en": "Soften", "he": "ריכוך" },
+    "presetBlock":   { "en": "Block", "he": "עצירה" },
+    "channelsHeading": { "en": "What happens", "he": "מה קורה" },
+    "channelPhoto":  { "en": "Show her face", "he": "להראות את הפנים שלה" },
+    "channelDuck":   { "en": "Turn the sound down", "he": "להנמיך את הצליל" },
+    "channelDuckIOSHint": { "en": "Quieter, not silent", "he": "יותר שקט, לא דומם", "notes": "iOS Tier 1 ducks; it cannot mute." },
+    "channelDim":    { "en": "Dim the screen", "he": "להחשיך את המסך" },
+    "channelDimNeedsPermission": { "en": "Needs overlay access", "he": "דורש הרשאת הצגה מעל אפליקציות" },
+    "channelDimIOSImpossible":   { "en": "iPhone doesn't let any app dim your screen. Nothing to change here.", "he": "אייפון לא מאפשר לאף אפליקציה להחשיך את המסך. אין מה לשנות כאן.", "intent": "Explains a platform impossibility without implying the parent did something wrong, and states there is nothing to tap. Reusing one lock affordance for both kinds of unavailable gets a parent tapping forever at something that will never open." },
+    "channelBlockIOSImpossible": { "en": "Not something iPhone allows. It isn't anything you've done.", "he": "זה לא משהו שאייפון מאפשר. זה לא משהו שאתה עשית." },
+    "channelChime":  { "en": "A soft chime", "he": "צלצול רך" },
+    "channelChimeHint": { "en": "Two notes, quiet", "he": "שני צלילים, בשקט" },
+    "turnOn":        { "en": "Turn on", "he": "להדליק" },
+    "downgradeBanner": { "en": "Showing a notification instead of dimming, because overlay access was turned off.", "he": "מציגים התראה במקום להחשיך, כי הרשאת ההצגה כובתה.", "intent": "Quietly doing less than the parent configured is exactly the failure this app cannot afford. Names the substitution AND the cause in one sentence." },
+    "downgradeFix":  { "en": "Turn it back on", "he": "להדליק חזרה" }
+  },
+
+  "sensitivity": {
+    "title":      { "en": "How eager to be", "he": "כמה להיות נלהבים", "intent": "Not 'Sensitivity', not 'Accuracy'. Avoids engineering vocabulary entirely — this is a first-class control, not an advanced setting." },
+    "explainer":  { "en": "Telling one child's voice from another is genuinely hard, and we won't always get it right. This is where you choose which kind of wrong you'd rather have.", "he": "להבדיל בין קול של ילד אחד לאחר זה קשה באמת, ולא תמיד נצליח. כאן אתה בוחר איזה סוג של טעות אתה מעדיף.", "intent": "Admits the limitation plainly. A design that assumes accuracy betrays the parent." },
+    "lowEnd":     { "en": "Fewer nudges, some missed", "he": "פחות תזכורות, כמה יתפספסו" },
+    "highEnd":    { "en": "More nudges, some wrong", "he": "יותר תזכורות, כמה שגויות" },
+    "liveLow":    { "en": "Where you are now: you'll only hear about it when we're quite sure, so some calls will slip past.", "he": "איפה שאתה עכשיו: תשמע רק כשאנחנו די בטוחים, אז חלק מהקריאות יחמקו." },
+    "liveMid":    { "en": "Where you are now: you'll hear about it most times {name} calls, and now and then when she didn't.", "he": "איפה שאתה עכשיו: תשמע ברוב הפעמים ש{name} קוראת, ומדי פעם כשהיא לא." },
+    "liveHigh":   { "en": "Where you are now: we'll speak up whenever we think it might be her, so expect some that weren't.", "he": "איפה שאתה עכשיו: נגיד לך בכל פעם שנחשוב שאולי זו היא, אז צפה לכמה שלא." },
+    "noRightAnswer": { "en": "There's no right setting. Move it, live with it a few days, move it again.", "he": "אין הגדרה נכונה. הזז אותה, תחיה איתה כמה ימים, הזז שוב.", "intent": "The UI must not pretend the slider has a correct setting. No 'recommended' marker, no numbers, no percentages." }
+  },
+
+  "schedule": {
+    "title":            { "en": "Family time", "he": "זמן משפחה" },
+    "androidOptional":  { "en": "Optional. Without any windows it listens whenever your screen is on.", "he": "אופציונלי. בלי חלונות היא מקשיבה בכל פעם שהמסך דלוק." },
+    "androidScreenOff": { "en": "On Android the microphone never runs while your screen is off — whatever you set here.", "he": "באנדרואיד המיקרופון לא פועל כשהמסך כבוי — לא משנה מה תגדיר כאן.", "notes": "ANDROID ONLY. Platform-conditional — never render as a universal claim." },
+    "iosGateTitle":     { "en": "Choose your hours first", "he": "בחר את השעות שלך קודם", "intent": "A reasonable condition, not a punishment. The parent is being asked to draw a boundary the platform will not draw for them." },
+    "iosGateBody":      { "en": "On Android, listening stops by itself whenever the screen goes off. iPhone has no such rule, so nothing would bound it here except you.", "he": "באנדרואיד ההקשבה נעצרת לבד כשהמסך כבה. לאייפון אין כלל כזה, אז שום דבר לא יגביל אותה כאן חוץ ממך." },
+    "iosGateAsk":       { "en": "So pick at least one window, and we'll only ever listen inside it.", "he": "אז בחר לפחות חלון אחד, ונקשיב רק בתוכו." },
+    "iosGateReassure":  { "en": "Most people start with the hours they're actually home together, then adjust.", "he": "רוב האנשים מתחילים מהשעות שהם באמת בבית ביחד, ואז מכווננים." },
+    "iosGateBlocked":   { "en": "Available once you've set one window", "he": "יהיה זמין אחרי שתגדיר חלון אחד", "intent": "The disabled CTA states its own unlock condition, so the gate is never a mystery." },
+    "addWindow":        { "en": "Add a window", "he": "להוסיף חלון" },
+    "suggestAfterSchool": { "en": "After school, 4–8pm", "he": "אחרי בית הספר, 16:00–20:00" },
+    "suggestWeekendAM":   { "en": "Weekend mornings", "he": "בקרי סוף שבוע" }
+  },
+
+  "data": {
+    "title":         { "en": "What's stored", "he": "מה נשמר" },
+    "summary":       { "en": "Voice profiles, on this phone. Setup clips are deleted once a profile is built, unless you keep them.", "he": "פרופילים קוליים, בטלפון הזה. קטעי ההתקנה נמחקים אחרי שנבנה פרופיל, אלא אם תשמור אותם." },
+    "keepClipsFor":  { "en": "Keep {name}'s clips", "he": "לשמור את הקטעים של {name}" },
+    "keepOn":        { "en": "On · a top-up builds on them", "he": "דלוק · חידוש יתבסס עליהם" },
+    "keepOff":       { "en": "Off · a top-up starts fresh", "he": "כבוי · חידוש יתחיל מאפס" },
+    "deleteHeading": { "en": "Delete", "he": "מחיקה" },
+    "deleteClips":   { "en": "{name}'s kept clips", "he": "הקטעים השמורים של {name}" },
+    "deleteProfile": { "en": "Someone's voice profile", "he": "פרופיל קולי של מישהו" },
+    "deleteProfileCost": { "en": "Gone for good — you'd record them again from scratch", "he": "נעלם לתמיד — תצטרך להקליט אותם מחדש", "intent": "Say plainly what deleting costs, because it does not come back. No dark patterns and no confirmation mazes — but no false comfort either." },
+    "deleteEverything":  { "en": "Delete everything", "he": "למחוק הכול" },
+    "deleteEverythingConfirm": { "en": "This removes every profile, every kept clip, and your settings. Nothing can be recovered, and you'd set the whole thing up again.", "he": "זה ימחק כל פרופיל, כל קטע שמור, ואת ההגדרות. שום דבר לא ניתן לשחזור, ותצטרך להתקין הכול מחדש." }
+  },
+
+  "history": {
+    "title":         { "en": "Moments", "he": "רגעים", "intent": "Not 'History', not 'Activity', not 'Log'. Deliberately not a dashboard, not a score, not a trend line." },
+    "today":         { "en": "Today", "he": "היום" },
+    "yesterday":     { "en": "Yesterday", "he": "אתמול" },
+    "entryWentToThem": { "en": "You went to her", "he": "הלכת אליה", "intent": "Records what happened without praise. Praise implies a score, and a score implies failure on the other days." },
+    "entryDismissed":  { "en": "You saw it", "he": "ראית את זה" },
+    "entryCorrected":  { "en": "You told us it wasn't her", "he": "אמרת לנו שזו לא הייתה היא", "intent": "Logged in exactly the same neutral voice as a success. A correction is a contribution, not a defect." },
+    "entryTime":     { "en": "{name}, {time}", "he": "{name}, {time}" },
+    "emptyTitle":    { "en": "Nothing here yet", "he": "עדיין אין כאן כלום" },
+    "emptyBody":     { "en": "When we notice {name} calling you, it'll show up here.", "he": "כשנשים לב ש{name} קוראת לך, זה יופיע כאן.", "intent": "Two lines and a small glyph. An empty log on day one is expected, so no illustration, no encouragement, no call to action." }
+  },
+
+  "about": {
+    "appName":       { "en": "Presence", "he": "Presence", "notes": "NAME-DEPENDENT. One of only three places the working name appears (this, the launcher label, and the notification app-name row)." },
+    "version":       { "en": "Version {version}", "he": "גרסה {version}" },
+    "creditsIntro":  { "en": "This app can hear your child because of work other people gave away. Here's who.", "he": "האפליקציה הזאת יכולה לשמוע את הילד שלך בגלל עבודה שאנשים אחרים נתנו בחינם. הנה מי.", "intent": "The attribution screen is a licence condition, so it is designed rather than stubbed. Framed as gratitude, which makes a legal obligation readable." },
+    "creditVadWhat":     { "en": "Finds where speech starts and stops.", "he": "מוצא איפה דיבור מתחיל ונגמר." },
+    "creditSpeakerWhat": { "en": "Tells one voice from another.", "he": "מבדיל בין קול לקול." },
+    "creditRuntimeWhat": { "en": "Runs both of them on your phone.", "he": "מריץ את שניהם על הטלפון שלך." },
+    "fullLicences":  { "en": "Read the full licence texts", "he": "לקרוא את נוסחי הרישיונות המלאים" }
+  },
+
+  "degraded": {
+    "micRevokedTitle": { "en": "Not listening", "he": "לא מקשיבה" },
+    "micRevokedBody":  { "en": "Microphone access was turned off, so nothing is being heard right now.", "he": "הגישה למיקרופון כובתה, אז לא שומעים כלום עכשיו." },
+    "micRevokedWhen":  { "en": "This happened at {time}. Nothing was recorded before or since — the profiles you built are untouched.", "he": "זה קרה ב{time}. שום דבר לא הוקלט לפני או מאז — הפרופילים שבנית לא נגעו בהם." },
+    "micRevokedCta":   { "en": "Turn the microphone back on", "he": "להדליק את המיקרופון חזרה" },
+
+    "killedTitle":  { "en": "Your phone closed us", "he": "הטלפון שלך סגר אותנו" },
+    "killedBody":   { "en": "At {time}, to save battery. We stopped listening then, and we won't restart on our own.", "he": "ב{time}, כדי לחסוך בסוללה. הפסקנו להקשיב אז, ולא נופעל שוב לבד.", "intent": "States plainly that it will not self-heal. A parent quietly trusting a silent, broken app is worse than no app at all." },
+    "killedRepeat": { "en": "{count} time this week. There's a phone setting that stops it happening.", "he": "{count} פעמים השבוע. יש הגדרה בטלפון שמונעת את זה." },
+    "killedCta":    { "en": "Start listening again", "he": "להתחיל להקשיב שוב" },
+
+    "modelFailedTitle": { "en": "Something's broken on our side", "he": "משהו נשבר אצלנו", "intent": "Owns the fault in the first line. It must never pretend." },
+    "modelFailedBody":  { "en": "The part that recognises voices won't start, so we've switched everything off rather than pretend to be listening.", "he": "החלק שמזהה קולות לא מצליח לעלות, אז כיבינו הכול במקום להעמיד פנים שאנחנו מקשיבים." },
+    "modelFailedSafe":  { "en": "Nothing about your family is lost. The profiles are safe on this phone.", "he": "שום דבר על המשפחה שלך לא אבד. הפרופילים בטוחים בטלפון הזה.", "intent": "A broken app is exactly when a parent fears losing their setup work." },
+    "modelFailedRestart": { "en": "Restarting your phone often fixes it", "he": "הפעלה מחדש של הטלפון בדרך כלל פותרת את זה" },
+
+    "noChildTitle": { "en": "We don't know anyone yet", "he": "עדיין לא מכירים אף אחד" },
+    "noChildBody":  { "en": "Tell us who to listen for and what they sound like. It takes a few minutes, and you can do it together.", "he": "ספר לנו למי להקשיב ואיך הם נשמעים. זה לוקח כמה דקות, ואפשר לעשות את זה ביחד.", "intent": "Routes warmly into enrollment rather than reporting a blocked state." },
+    "noChildCta":   { "en": "Add your child", "he": "להוסיף את הילד שלך" },
+
+    "blockedTitle": { "en": "Paused while you're on a call", "he": "מושהה בזמן שיחה" },
+    "blockedBody":  { "en": "Only one app can use the microphone at a time, and right now it's your call. We'll pick straight back up afterwards.", "he": "רק אפליקציה אחת יכולה להשתמש במיקרופון בכל רגע, וכרגע זו השיחה שלך. נמשיך מיד אחר כך." },
+    "blockedOtherApp": { "en": "Another app is using the microphone right now. We'll pick straight back up when it's free.", "he": "אפליקציה אחרת משתמשת במיקרופון עכשיו. נמשיך מיד כשהוא יתפנה." },
+    "blockedSelfHealing": { "en": "Nothing to do. This one fixes itself.", "he": "אין מה לעשות. זה נפתר לבד.", "intent": "The only degraded state with no action and no amber, because it genuinely resolves itself. Still stated plainly." }
+  },
+
+  "common": {
+    "back":        { "en": "Back", "he": "חזרה" },
+    "close":       { "en": "Close", "he": "לסגור" },
+    "cancel":      { "en": "Cancel", "he": "לבטל" },
+    "save":        { "en": "Save", "he": "לשמור" },
+    "delete":      { "en": "Delete", "he": "למחוק" },
+    "notNow":      { "en": "Not now", "he": "לא עכשיו" },
+    "openSettings":{ "en": "Open Android settings", "he": "לפתוח את הגדרות אנדרואיד" },
+    "languageHebrew": { "en": "Hebrew", "he": "עברית" },
+    "languageEnglish":{ "en": "English", "he": "אנגלית" },
+    "you":         { "en": "you", "he": "אתה", "notes": "Appended to the parent's own row: 'Dad — you'. Hebrew needs a gendered form; the profile carries it." }
+  }
+}

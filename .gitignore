@@ -64,3 +64,6 @@ models/*.bin
 # --- Local env ---
 .env
 .env.local
+
+# Design drop archives — contents are extracted and tracked alongside
+docs/design/*.zip
