@@ -91,7 +91,7 @@ harness/src/main/kotlin/app/presence/harness/
   Metrics.kt                        FA/hour, miss rate, latency, EER
   Evaluation.kt                     runs the engine over a manifest, sweeps thresholds
   Report.kt                         markdown + CSV output, split by language
-  Main.kt                           CLI entry point
+  Main.kt                           CLI entry point (parseArgs is internal, so it is testable)
 
 tools/list-models.sh                enumerate sherpa-onnx model release assets
 tools/fetch-models.sh               download chosen models into models/
@@ -1303,7 +1303,7 @@ class VadGate(
 - [ ] **Step 5: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.VadGateTest"`
-Expected: PASS, 11 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -4566,6 +4566,16 @@ class ManifestTest {
     }
 
     @Test
+    fun `rejects a manifest listing the same audio path twice`() {
+        val row = "dup.wav,h1,maya,target_child,hebrew,false,spontaneous,1.0,table,quiet,kitchen,2026-08-01"
+        val file = tempFile("recordings.csv", "$recordingsHeader\n$row\n$row\n")
+
+        val failure = assertFailsWith<IllegalArgumentException> { Manifest.readRecordings(file) }
+
+        assertTrue(failure.message!!.contains("dup.wav"), failure.message!!)
+    }
+
+    @Test
     fun `rejects a manifest with a header but no rows`() {
         val file = tempFile("recordings.csv", "$recordingsHeader\n")
 
@@ -4777,7 +4787,7 @@ object Manifest {
         require(rows.isNotEmpty()) { "$path has a header but no data rows" }
         requireColumns(rows.first().second.keys, REQUIRED_RECORDING_COLUMNS, path)
 
-        return rows.map { (lineNumber, row) ->
+        val recordings = rows.map { (lineNumber, row) ->
             withRowContext(path, lineNumber) {
             Recording(
                 path = row.getValue("path"),
@@ -4796,6 +4806,15 @@ object Manifest {
             )
             }
         }
+
+        // Evaluation classifies a detection by its recording's role, so a path appearing twice
+        // would let a false alarm resolve to the wrong row silently.
+        val duplicatePaths = recordings.groupingBy { it.path }.eachCount().filterValues { it > 1 }.keys
+        require(duplicatePaths.isEmpty()) {
+            "$path lists these audio paths more than once: ${duplicatePaths.joinToString()} — " +
+                "each recording must appear once"
+        }
+        return recordings
     }
 
     fun readEvents(path: Path): List<CallEvent> {
@@ -5457,6 +5476,16 @@ class EvaluationTest {
     }
 
     @Test
+    fun `the report surfaces warnings that qualify the numbers`() {
+        val outcomes = listOf(Outcome("ALL", 6f, 1, 2.0, 8, 10, listOf(1_000L)))
+
+        val markdown = Report.markdown(outcomes, "vad: x", listOf("noam: enrolled partially"))
+
+        assertTrue(markdown.contains("Warnings"))
+        assertTrue(markdown.contains("noam: enrolled partially"))
+    }
+
+    @Test
     fun `the csv has a header and one row per outcome`() {
         val csv = Report.csv(listOf(Outcome("ALL", 6f, 1, 2.0, 8, 10, listOf(1_000))))
 
@@ -5539,25 +5568,25 @@ object Evaluation {
 
         val detections = ArrayList<Detection>()
         var negativeSeconds = 0.0
+        var falseAlarms = 0
 
         for (trace in selected) {
             val accumulator = EvidenceAccumulator(AccumulatorConfig(fireThreshold = threshold))
+            // Role is known here, so a detection is classified where it is created rather than by a
+            // second path lookup that duplicate paths could resolve to the wrong row — and this is
+            // O(n) instead of O(detections x traces).
+            val isTarget = trace.recording.role == RecordingRole.TARGET_CHILD
             for (observation in trace.observations) {
                 if (accumulator.accept(observation) != null) {
                     detections += Detection(trace.recording.path, observation.timestampMs)
+                    if (!isTarget) falseAlarms++
                 }
             }
-            if (trace.recording.role != RecordingRole.TARGET_CHILD) {
-                negativeSeconds += trace.durationSeconds
-            }
+            if (!isTarget) negativeSeconds += trace.durationSeconds
         }
 
         val relevantEvents = events.filter { it.recordingPath in selectedPaths }
         val scoring = Metrics.scoreEvents(detections, relevantEvents)
-        val falseAlarms = detections.count { detection ->
-            selected.first { it.recording.path == detection.recordingPath }
-                .recording.role != RecordingRole.TARGET_CHILD
-        }
 
         return Outcome(
             label = label,
@@ -5590,7 +5619,11 @@ package app.presence.harness
 
 object Report {
 
-    fun markdown(outcomes: List<Outcome>, provenance: String): String = buildString {
+    fun markdown(
+        outcomes: List<Outcome>,
+        provenance: String,
+        warnings: List<String> = emptyList(),
+    ): String = buildString {
         appendLine("# Phase 0 accuracy report")
         appendLine()
         appendLine("Go / no-go criteria are spec §4.3. **Both languages must clear every criterion")
@@ -5602,6 +5635,14 @@ object Report {
         appendLine(provenance.trim())
         appendLine("```")
         appendLine()
+        if (warnings.isNotEmpty()) {
+            appendLine("## Warnings")
+            appendLine()
+            appendLine("These affect how much the numbers below can be trusted.")
+            appendLine()
+            for (warning in warnings) appendLine("- $warning")
+            appendLine()
+        }
         appendLine("## Results")
         appendLine()
         appendLine("| Slice | Threshold | FA/hour | Detection | Miss rate | Median latency | Verdict |")
@@ -5654,7 +5695,7 @@ object Report {
 - [ ] **Step 7: Run the tests and verify they pass**
 
 Run: `./gradlew :harness:test --tests "app.presence.harness.EvaluationTest"`
-Expected: PASS, 11 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 8: Write the CLI**
 
@@ -5705,10 +5746,23 @@ Run ./tools/fetch-models.sh first. See spec §9.1 for the manifest format.
 """
 
 fun main(argv: Array<String>) {
-    val args = parseArgs(argv)
+    val args = try {
+        parseArgs(argv)
+    } catch (failure: IllegalArgumentException) {
+        System.err.println("error: ${failure.message}")
+        println(USAGE)
+        exitProcess(2)
+    }
     if (args.isEmpty() || "help" in args) {
         println(USAGE)
         return
+    }
+    for (required in listOf("manifest", "models", "out")) {
+        if (required !in args) {
+            System.err.println("error: --$required is required")
+            println(USAGE)
+            exitProcess(2)
+        }
     }
 
     val manifestDir = Path.of(args.getValue("manifest"))
@@ -5780,25 +5834,34 @@ private fun enrolProfiles(
     enrollment: List<Recording>,
     root: Path,
     embedder: SpeakerEmbedder,
-): List<VoiceProfile> {
-    val service = EnrollmentService(EnrollmentPolicy(minSecondsPerLanguage = 20.0))
-    return enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
+    warnings: MutableList<String>,
+): List<VoiceProfile> =
+    enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
         val clips = group.mapNotNull { recording ->
             val language = recording.language ?: return@mapNotNull null
             val samples = WavReader.read(root.resolve(recording.path))
             if (samples.size < SAMPLE_RATE_HZ) return@mapNotNull null
             EnrollmentClip(language, embedder.embed(samples), samples.size.toDouble() / SAMPLE_RATE_HZ)
         }
-        if (clips.isEmpty()) return@mapNotNull null
-        when (val result = service.enroll(speakerId, group.first().role.toProfileRole(), clips)) {
+        if (clips.isEmpty()) {
+            warnings += "$speakerId: no usable enrollment audio"
+            return@mapNotNull null
+        }
+        // Require only the languages this person actually has material for. Demanding both would
+        // flag every monolingual household — likely the common case — drowning real shortfalls in
+        // expected noise.
+        val policy = EnrollmentPolicy(
+            minSecondsPerLanguage = 20.0,
+            requiredLanguages = clips.map { it.language }.toSet(),
+        )
+        when (val result = EnrollmentService(policy).enroll(speakerId, group.first().role.toProfileRole(), clips)) {
             is EnrollmentResult.Complete -> result.profile
             is EnrollmentResult.Incomplete -> {
-                println("  $speakerId enrolled partially; short by ${result.shortfallSeconds}")
+                warnings += "$speakerId: enrolled partially, short by ${result.shortfallSeconds}"
                 result.profile
             }
         }
     }
-}
 
 private fun traceOf(
     recording: Recording,
@@ -5828,24 +5891,38 @@ private fun traceOf(
     return Trace(recording, observations, samples.size.toDouble() / SAMPLE_RATE_HZ)
 }
 
-private fun parseArgs(argv: Array<String>): Map<String, String> {
+private val KNOWN_FLAGS = setOf(
+    "help", "manifest", "models", "out", "holdout", "input-name", "output-name",
+)
+
+/**
+ * `internal` so it can be tested directly, and throwing rather than exiting for the same reason —
+ * `exitProcess` inside a parser would kill the test JVM.
+ */
+internal fun parseArgs(argv: Array<String>): Map<String, String> {
     val args = mutableMapOf<String, String>()
     var index = 0
     while (index < argv.size) {
         val token = argv[index]
-        if (!token.startsWith("--")) {
-            System.err.println("unexpected argument: $token")
-            exitProcess(1)
-        }
+        require(token.startsWith("--")) { "unexpected argument: $token" }
         val key = token.removePrefix("--")
+        // A silently-ignored typo matters here: --holdout is the leakage guard, so a mistyped
+        // --holdouts would let held-out households quietly rejoin the evaluation.
+        require(key in KNOWN_FLAGS) {
+            "unknown flag --$key. Known flags: ${KNOWN_FLAGS.sorted().joinToString { "--$it" }}"
+        }
         if (key == "help") {
             args["help"] = "true"
             index += 1
-        } else {
-            require(index + 1 < argv.size) { "missing value for --$key" }
-            args[key] = argv[index + 1]
-            index += 2
+            continue
         }
+        require(index + 1 < argv.size) { "missing value for --$key" }
+        val value = argv[index + 1]
+        // A flag-shaped value almost always means the real value was forgotten, and would otherwise
+        // swallow the following flag.
+        require(!value.startsWith("--")) { "--$key expects a value but was followed by $value" }
+        args[key] = value
+        index += 2
     }
     return args
 }
