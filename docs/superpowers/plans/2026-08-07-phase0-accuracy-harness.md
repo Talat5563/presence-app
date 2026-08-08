@@ -3335,7 +3335,9 @@ class SileroVadTest {
      * Silero is not an energy detector — it responds to speech specifically. A pure tone has no
      * broadband excitation, no formant structure and no temporal dynamics, so the model rates it
      * no higher than silence. Measured on the real model: silence 5.42e-4, tone 5.26e-4 (the tone
-     * marginally *lower*), loud broadband noise 8.22e-4 — the only synthetic signal it reacts to.
+     * marginally *lower*). Broadband noise is the only synthetic signal it reacts to — 1.46e-3 with
+     * a fresh seed per frame as below (ratio ~2.7), or 8.22e-4 replaying one frame, which is why
+     * the diagnostic's fixed-seed reading is lower than this test's.
      *
      * So this is a smoke test that the model is genuinely a function of its input rather than
      * returning a constant. Real speech discrimination is measured on actual recordings in
@@ -3350,7 +3352,7 @@ class SileroVadTest {
             val noiseScore = (1..10).map { vad.speechProbability(loudNoise(it)) }.average()
 
             assertTrue(
-                noiseScore > silenceScore * 1.2,
+                noiseScore > silenceScore * 1.5,
                 "broadband noise ($noiseScore) should score clearly above silence ($silenceScore)",
             )
         }
