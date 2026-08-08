@@ -36,6 +36,7 @@ top. Spec §4.1 lays out that accuracy ladder with sources, and §9 defines expl
 |---|---|
 | `docs/superpowers/specs/2026-08-06-presence-design.md` | The full design specification — architecture, detection pipeline, per-platform intervention design, permissions, failure modes, testing strategy |
 | `docs/superpowers/plans/2026-08-07-phase0-accuracy-harness.md` | The Phase 0 implementation plan, task by task |
+| `docs/superpowers/plans/2026-08-07-phase0-execution-notes.md` | **Read before running an evaluation** — measured model behaviour, decisions taken during implementation, and known limitations |
 | `docs/design/UI_DESIGN_PROMPT.md` | A self-contained, ready-to-paste prompt for designing the complete UI. Hand it to a fresh Claude session |
 | `shared/` | Kotlin Multiplatform detection engine — framing, VAD gating, embeddings, household scoring, evidence accumulation |
 | `harness/` | JVM-only evaluation harness that drives the engine over a corpus |
