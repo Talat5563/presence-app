@@ -2656,6 +2656,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.writeText
 import javax.sound.sampled.AudioFileFormat
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
@@ -2749,6 +2750,33 @@ class WavReaderTest {
     }
 
     @Test
+    fun `rejects a bit depth other than 16, naming the fix`() {
+        val path = tempWav("8bit.wav")
+        val samples = byteArrayOf(0, 64, -64)
+        val format = AudioFormat(16_000f, 8, 1, true, false)
+        AudioSystem.write(
+            AudioInputStream(samples.inputStream(), format, samples.size.toLong()),
+            AudioFileFormat.Type.WAVE,
+            path.toFile(),
+        )
+
+        val failure = assertFailsWith<UnsupportedAudioException> { WavReader.read(path) }
+
+        assertTrue(failure.message!!.contains("8-bit"), failure.message!!)
+        assertTrue(failure.message!!.contains("ffmpeg"), "should give the fix command")
+    }
+
+    @Test
+    fun `reports an unreadable file as unsupported rather than leaking a checked exception`() {
+        val path = tempWav("not-audio.wav")
+        path.writeText("this is not a wav file at all")
+
+        val failure = assertFailsWith<UnsupportedAudioException> { WavReader.read(path) }
+
+        assertTrue(failure.message!!.contains("not-audio.wav"))
+    }
+
+    @Test
     fun `reads a file with many samples`() {
         val path = tempWav("long.wav")
         writeWav(path, listOf(List(16_000) { (it % 1000).toShort() }))
@@ -2818,10 +2846,12 @@ Expected: FAIL — unresolved reference `WavReader`.
 package app.presence.harness
 
 import app.presence.audio.SAMPLE_RATE_HZ
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Path
 import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.UnsupportedAudioFileException
 import kotlin.io.path.exists
 import kotlin.io.path.name
 
@@ -2845,8 +2875,19 @@ object WavReader {
             throw UnsupportedAudioException("audio file not found: $path")
         }
 
-        AudioSystem.getAudioInputStream(path.toFile()).use { stream ->
-            val format = stream.format
+        // AudioSystem throws its own checked exceptions for a corrupt or non-audio file. Wrap
+        // them: Task 17 walks thousands of corpus files and catches UnsupportedAudioException per
+        // file to keep a batch alive, so a foreign exception type would kill the whole run.
+        val stream = try {
+            AudioSystem.getAudioInputStream(path.toFile())
+        } catch (failure: UnsupportedAudioFileException) {
+            throw UnsupportedAudioException("${path.name}: not a readable audio file (${failure.message})")
+        } catch (failure: IOException) {
+            throw UnsupportedAudioException("${path.name}: could not be read (${failure.message})")
+        }
+
+        stream.use { audio ->
+            val format = audio.format
 
             if (format.sampleRate.toInt() != SAMPLE_RATE_HZ) {
                 throw UnsupportedAudioException(
@@ -2864,9 +2905,17 @@ object WavReader {
             }
 
             val channels = format.channels
-            val bytes = stream.readAllBytes()
+            val bytes = audio.readAllBytes()
             val order = if (format.isBigEndian) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
             val shorts = ByteBuffer.wrap(bytes).order(order).asShortBuffer()
+
+            // The one place a corrupt file could otherwise degrade quietly.
+            if (shorts.limit() % channels != 0) {
+                throw UnsupportedAudioException(
+                    "${path.name}: ${shorts.limit()} samples do not divide evenly into $channels " +
+                        "channels — the file is truncated",
+                )
+            }
 
             val frameCount = shorts.limit() / channels
             val samples = FloatArray(frameCount)
@@ -2875,6 +2924,8 @@ object WavReader {
                 for (channel in 0 until channels) {
                     sum += shorts.get(frame * channels + channel) / FULL_SCALE
                 }
+                // Dividing by 32_768 already bounds this to [-1, 1]; the clamp is belt-and-braces
+                // against a malformed frame count rather than the thing enforcing the range.
                 samples[frame] = (sum / channels).coerceIn(-1f, 1f)
             }
             return samples
@@ -2886,7 +2937,7 @@ object WavReader {
 - [ ] **Step 5: Run the test and verify it passes**
 
 Run: `./gradlew :harness:test`
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 6: Commit**
 
