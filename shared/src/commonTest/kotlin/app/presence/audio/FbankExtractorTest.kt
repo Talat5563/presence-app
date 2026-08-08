@@ -3,6 +3,7 @@ package app.presence.audio
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -145,6 +146,30 @@ class FbankExtractorTest {
         assertTrue(
             earlyPeak < latePeak,
             "early frame peaked at bin $earlyPeak, late frame at bin $latePeak",
+        )
+    }
+
+    /**
+     * Guards the log floor against swallowing pathologically quiet input, and in doing so pins the
+     * ×32768 int16 scaling — the one constant no other test can reach.
+     *
+     * Mean normalization cancels any uniform gain exactly: scaling the waveform shifts every log
+     * energy by the same constant, which the per-bin mean then subtracts. So the scaling is
+     * observable only where the floor clips. This amplitude (2e-7, well below one 16-bit LSB) is
+     * chosen to sit that far down deliberately; at realistic levels the scaling provably has no
+     * effect on the output, which is why nothing else here can pin it. Noise rather than a tone,
+     * because a stationary signal normalizes to zero regardless.
+     */
+    @Test
+    fun `quiet audio still carries information rather than clipping to the log floor`() {
+        val quiet = Random(11).let { rng -> FloatArray(8_000) { (rng.nextFloat() - 0.5f) * 2e-7f } }
+
+        val features = extractor.extract(quiet)
+
+        val distinctValues = features.flatMap { row -> row.toList() }.distinct()
+        assertTrue(
+            distinctValues.size > 1,
+            "every value collapsed to ${distinctValues.firstOrNull()} — the log floor swallowed the signal",
         )
     }
 }
