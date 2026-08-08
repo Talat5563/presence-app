@@ -5,6 +5,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Path
+import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.UnsupportedAudioFileException
 import kotlin.io.path.exists
@@ -30,15 +31,19 @@ object WavReader {
             throw UnsupportedAudioException("audio file not found: $path")
         }
 
-        val stream = try {
-            AudioSystem.getAudioInputStream(path.toFile())
+        // Everything touching the audio layer sits inside this try. AudioSystem throws checked
+        // exceptions on both open and read, and Task 17 walks thousands of corpus files catching
+        // UnsupportedAudioException per file — a foreign type escaping here would kill the batch.
+        return try {
+            AudioSystem.getAudioInputStream(path.toFile()).use { audio -> decode(path, audio) }
         } catch (failure: UnsupportedAudioFileException) {
             throw UnsupportedAudioException("${path.name}: not a readable audio file (${failure.message})")
         } catch (failure: IOException) {
             throw UnsupportedAudioException("${path.name}: could not be read (${failure.message})")
         }
+    }
 
-        stream.use { audio ->
+    private fun decode(path: Path, audio: AudioInputStream): FloatArray {
             val format = audio.format
 
             if (format.sampleRate.toInt() != SAMPLE_RATE_HZ) {
