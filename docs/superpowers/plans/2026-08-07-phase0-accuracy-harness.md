@@ -2006,6 +2006,7 @@ package app.presence.engine
 
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -2150,9 +2151,7 @@ class EvidenceAccumulatorTest {
 
     @Test
     fun `rejects a non-positive window`() {
-        kotlin.test.assertFailsWith<IllegalArgumentException> {
-            AccumulatorConfig(windowMs = 0)
-        }
+        assertFailsWith<IllegalArgumentException> { AccumulatorConfig(windowMs = 0) }
     }
 }
 ```
