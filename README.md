@@ -81,6 +81,20 @@ Product requirements, not aspirations — each one testable:
 - Real family audio never enters version control (enforced by `.gitignore`)
 - Uninstalling deletes everything
 
+## Running Phase 0
+
+Requires JDK 17 and Gradle 8.11.
+
+```bash
+./tools/fetch-models.sh                         # download models into models/ (gitignored)
+./gradlew check                                 # pure-logic tests — no models, no network
+./gradlew integrationTest                       # tests that need the real model files
+./gradlew :harness:run --args="--help"          # evaluation CLI
+```
+
+Model files are never committed. `models/PROVENANCE.txt` records which ones a given result used —
+quote it whenever you report numbers.
+
 ## Attribution
 
 If the shipped model is fine-tuned on **Samrómur Children** (spec §4.1), that corpus is licensed
