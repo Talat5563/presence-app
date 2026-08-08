@@ -28,15 +28,20 @@ private const val USAGE = """
 Phase 0 accuracy harness.
 
 Usage:
-  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--input-name N] [--output-name N]"
+  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--input-name N] [--output-name N]"
 
-  --manifest DIR   directory containing recordings.csv and events.csv; audio paths are
-                   resolved relative to it
-  --models DIR     directory containing silero_vad.onnx and speaker_embedding.onnx
-  --out DIR        where report.md and results.csv are written
-  --holdout LIST   comma-separated household ids reserved for final measurement only
-  --input-name N   embedding model input tensor name (default: feats)
-  --output-name N  embedding model output tensor name (default: embs)
+  --manifest DIR     directory containing recordings.csv and events.csv; audio paths are
+                     resolved relative to it
+  --models DIR       directory containing silero_vad.onnx and speaker_embedding.onnx
+  --out DIR          where report.md and results.csv are written
+  --holdout LIST     comma-separated household ids reserved for final measurement only
+  --evaluate MODE    "dev" (default) sweeps and tunes on every household not in --holdout.
+                     "holdout" measures once, only on --holdout households, and is the only
+                     honest final number. A threshold chosen by looking at dev means nothing
+                     until it is re-measured on holdout — dev numbers are for tuning, not
+                     for deciding ship/iterate/fall-back.
+  --input-name N     embedding model input tensor name (default: feats)
+  --output-name N    embedding model output tensor name (default: embs)
 
 Run ./tools/fetch-models.sh first. See spec §9.1 for the manifest format.
 """
@@ -64,13 +69,24 @@ fun main(argv: Array<String>) {
     val manifestDir = Path.of(args.getValue("manifest"))
     val modelsDir = Path.of(args.getValue("models"))
     val outDir = Path.of(args.getValue("out"))
-    val holdout = args["holdout"]?.split(",")?.map { it.trim() }?.toSet().orEmpty()
 
     val recordings = Manifest.readRecordings(manifestDir.resolve("recordings.csv"))
     val events = Manifest.readEvents(manifestDir.resolve("events.csv"))
     validateEvents(recordings, events)
     println("Loaded ${recordings.size} recordings and ${events.size} call events.")
+
+    val holdout = args["holdout"]?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet().orEmpty()
+    val households = recordings.map { it.householdId }.toSet()
+    val unknownHoldout = holdout - households
+    require(unknownHoldout.isEmpty()) {
+        "--holdout names households not in the corpus: ${unknownHoldout.joinToString()}. " +
+            "Known: ${households.sorted().joinToString()}"
+    }
     if (holdout.isNotEmpty()) println("Holding out households: ${holdout.joinToString()}")
+
+    val mode = args["evaluate"] ?: "dev"
+    require(mode == "dev" || mode == "holdout") { "--evaluate must be 'dev' or 'holdout', was '$mode'" }
+    require(mode == "dev" || holdout.isNotEmpty()) { "--evaluate holdout needs --holdout" }
 
     val warnings = mutableListOf<String>()
 
@@ -107,7 +123,11 @@ fun main(argv: Array<String>) {
                 }
             }
 
-            val evaluated = traces.filter { it.recording.householdId !in holdout }
+            // dev sweeps and tunes; holdout measures once, on data never used for tuning.
+            val evaluated = when (mode) {
+                "holdout" -> traces.filter { it.recording.householdId in holdout }
+                else -> traces.filter { it.recording.householdId !in holdout }
+            }
             val thresholds = (2..20 step 2).map { it.toFloat() }
             val outcomes = buildList {
                 addAll(Evaluation.sweep(evaluated, events, thresholds, "ALL"))
@@ -128,7 +148,7 @@ fun main(argv: Array<String>) {
             outDir.resolve("results.csv").writeText(Report.csv(outcomes))
             println("Wrote ${outDir.resolve("report.md")} and ${outDir.resolve("results.csv")}")
 
-            val best = outcomes.filter { it.label == "ALL" }.minByOrNull { it.verdict.ordinal }
+            val best = outcomes.filter { it.label == "ALL" }.minByOrNull { it.verdict.rank }
             println("Best overall verdict: ${best?.verdict ?: "none"}")
         }
     }
@@ -223,7 +243,7 @@ private fun traceOf(
 }
 
 private val KNOWN_FLAGS = setOf(
-    "help", "manifest", "models", "out", "holdout", "input-name", "output-name",
+    "help", "manifest", "models", "out", "holdout", "evaluate", "input-name", "output-name",
 )
 
 internal fun parseArgs(argv: Array<String>): Map<String, String> {

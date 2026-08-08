@@ -3,8 +3,14 @@ package app.presence.harness
 /** The engine fired at this position in this recording. */
 data class Detection(val recordingPath: String, val timestampMs: Long)
 
-/** Spec §4.3's three outcomes. */
-enum class Verdict { SHIP, ITERATE, FALL_BACK }
+/**
+ * Spec §4.3's three outcomes.
+ *
+ * @param rank best-to-worst ordering, used to pick the best verdict across a sweep. Explicit
+ *   rather than relying on declaration order (`ordinal`), so reordering the enum for readability
+ *   can never silently change which verdict a sweep reports as best.
+ */
+enum class Verdict(val rank: Int) { SHIP(0), ITERATE(1), FALL_BACK(2) }
 
 data class EventScoring(
     val detected: Int,
