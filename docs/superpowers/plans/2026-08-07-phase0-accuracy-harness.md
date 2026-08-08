@@ -2149,6 +2149,20 @@ class EvidenceAccumulatorTest {
         assertNull(subject.accept(Observation(60_000, 3.0f)))
     }
 
+    /**
+     * The positive half of the cooldown boundary. The test above asserts null at the boundary,
+     * which passes whether the boundary correctly allows evaluation or an off-by-one suppresses
+     * it entirely — this one fires on its own evidence at exactly `cooldownMs` elapsed, so a
+     * `<=` in place of `<` would be caught.
+     */
+    @Test
+    fun `firing is allowed the moment the cooldown has exactly elapsed`() {
+        val subject = accumulator()
+        assertNotNull(subject.accept(Observation(0, 7.0f)))
+
+        assertClose(7.0f, assertNotNull(subject.accept(Observation(60_000, 7.0f))))
+    }
+
     @Test
     fun `rejects a non-positive window`() {
         assertFailsWith<IllegalArgumentException> { AccumulatorConfig(windowMs = 0) }
@@ -2253,7 +2267,7 @@ class EvidenceAccumulator(
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `./gradlew :shared:jvmTest --tests "app.presence.engine.EvidenceAccumulatorTest"`
-Expected: PASS, 14 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
