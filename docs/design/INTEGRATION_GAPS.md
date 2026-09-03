@@ -14,41 +14,44 @@ Phase 6 scope, not gaps. What follows is everything that is *not* explained by t
 
 ---
 
-## Decisions needed before Phase 6 can be planned
+## Decisions taken (2026-08-16)
 
-### D1 — Multi-child in v1: yes or no?
+### D1 — Multi-child: **no, not in v1**
 
-**The design assumes yes throughout.** `home.listeningForMany`, `overlay.hedgedCallSecondChild`,
-`overlay.notEither`, and screen 15's `soften-multi` state all exist.
+**One active target child at a time, switchable in settings.** Multi-*profile* support stays exactly
+as built — siblings and the parent are still enrolled as non-targets, which is what makes relative
+scoring work at all. What is out is *simultaneous* recognition of two targets.
 
-**The engine cannot do it.** `DetectionEngine` carries a single `targetPersonId` and
-`HouseholdMatcher` a single `target`; a second `TARGET_CHILD` profile lands in the *cohort*, where it
-actively suppresses the first child's score. Two enrolled children would make the app worse at
-detecting either one.
+This matches the engine as built, so **no engine change is needed.** `DetectionEngine` already
+carries a single `targetPersonId`.
 
-Spec §10 open question 3 asked this and it was never answered. It cannot stay open any longer —
-the two answers produce materially different work:
+What follows from it:
 
-- **No:** drop those four strings and one state from the design; the roster still enrolls siblings,
-  but only as non-targets. Cheapest, and defensible for a first release.
-- **Yes:** the engine needs N target profiles with per-target accumulators, and the matcher needs to
-  exclude other targets from the cohort rather than scoring against them. Not enormous, but it is
-  engine work with its own accuracy implications, and Phase 2's measurement would need to cover it.
+- **The design drops four strings and one state:** `home.listeningForMany`,
+  `overlay.hedgedCallSecondChild`, `overlay.notEither`, and screen 15's `soften-multi`. They are
+  already among the unreferenced keys, so nothing breaks — but they should be removed rather than
+  left looking like a planned feature.
+- **A second target must be rejected, not silently degraded.** This is the important consequence. A
+  second `TARGET_CHILD` profile lands in the cohort and *actively suppresses* the first child's
+  score, so two enrolled targets make the app worse at detecting either one. Both the app and the
+  harness need to refuse it with an explanation, not accept it and quietly get worse. The harness
+  already logs a household lacking a target; it must equally refuse one with two.
+- **Settings needs "which child am I listening for?"** rather than a multi-select — a switch between
+  enrolled children, one active at a time. Screen 21 currently implies a list of equals.
 
-### D2 — Android "mute": DND, or ducking?
+### D2 — Android "mute": **ducking, on both platforms**
 
-Spec §6 renders Android's mute as `AudioManager` volume plus Do-Not-Disturb, and §7 counts
-notification-policy access as one of the four Settings trips. **The design has dropped it**: screen
-18's only audio channel is `response.channelDuck` ("Turn the sound down") as an unlocked toggle, and
-no screen, state or string covers the DND permission.
+Adopted. The spec has been corrected: §6's Android intervention row is now audio-focus ducking
+(`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`), and the notification-policy permission is gone from §7.
 
-Ducking is the iOS mechanism. On Android it lowers media volume but does not silence a ringtone or
-a notification, which is what a parent asking for "mute" probably means. Either:
+**This is a real onboarding win.** Android's Settings trips drop from four to three — and DND policy
+access was the least explicable of the four to a parent. Screen 18's unlocked duck toggle is now
+correct as designed, and screen 03 needs no fourth hand-off.
 
-- **Adopt ducking on both platforms** — simpler, one fewer Settings trip, weaker intervention. Then
-  spec §6 and §7 need correcting.
-- **Keep DND on Android** — matches the spec, but screen 18 needs a locked row and screen 03 needs a
-  fourth permission hand-off.
+**One honest caveat for the copy.** Ducking lowers whatever is *playing* — video, music, a podcast.
+It does not silence a ringtone or an incoming notification. `response.channelDuck` currently reads
+"Turn the sound down", which is accurate; anything stronger would over-promise. Worth keeping in mind
+if that string is ever rewritten to sound more decisive.
 
 ---
 

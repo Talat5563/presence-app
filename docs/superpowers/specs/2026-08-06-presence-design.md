@@ -31,7 +31,7 @@ listening.
 | Decision | Choice |
 |---|---|
 | Detection target | The parent's own child, by speaker identity |
-| Default response | Dim the screen + mute audio + show the child's photo |
+| Default response | Dim the screen + duck audio + show the child's photo |
 | Response configurability | Fully user-configurable per child |
 | Listening window | Only while the phone is in use; optionally narrowed further to family-time schedules |
 | Data handling | 100% on-device. No account, no server, no upload |
@@ -106,7 +106,7 @@ pay for itself.
   ListeningService        foreground service, type=microphone
   ScreenStateReceiver     ACTION_SCREEN_ON / OFF / USER_PRESENT
   OverlayIntervention     TYPE_APPLICATION_OVERLAY — dim scrim + photo card
-  AudioDucker             AudioManager / DND policy
+  AudioDucker             AudioManager transient-may-duck audio focus
   PermissionFlow          staged onboarding
   actual: AudioRecord, ONNX Runtime Android, EncryptedFile
 
@@ -454,7 +454,7 @@ special for it.
 `InterventionConfig` declares **intent**, not mechanism:
 
 - `Notify` — least intrusive. A notification with the child's photo.
-- `Soften` — the default. Make the phone less compelling: dim, mute/duck, show their face.
+- `Soften` — the default. Make the phone less compelling: dim, duck audio, show their face.
 - `Block` — hard stop until acknowledged.
 
 Each platform renders the intent at the strongest level it is permitted to.
@@ -465,7 +465,7 @@ Each platform renders the intent at the strongest level it is permitted to.
 |---|---|---|
 | Dim | Semi-transparent overlay scrim | `SYSTEM_ALERT_WINDOW` |
 | Photo | Card in the same overlay window | `SYSTEM_ALERT_WINDOW` |
-| Mute | `AudioManager` volume + DND | Notification policy access |
+| Duck audio | `AudioManager` audio focus, `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` | None |
 | Notify | Standard notification | `POST_NOTIFICATIONS` |
 | Block | Full-opacity overlay, dismiss required | `SYSTEM_ALERT_WINDOW` |
 
@@ -523,7 +523,7 @@ restores full parity with Android's "only while I'm using my phone" rule.
 
 ## 7. Permissions and onboarding
 
-Android requires four separate trips into system Settings before every feature works. Presenting
+Android requires three separate trips into system Settings before every feature works. Presenting
 that as a wall on first launch would lose most users.
 
 | Permission | Enables | Friction |
@@ -532,12 +532,11 @@ that as a wall on first launch would lose most users.
 | `FOREGROUND_SERVICE_MICROPHONE` | Mic while in another app | Manifest only |
 | `POST_NOTIFICATIONS` | Required service notification | Standard prompt |
 | `SYSTEM_ALERT_WINDOW` | Dim + photo overlay | Settings trip |
-| Notification policy access | Muting / DND | Settings trip |
 | Battery optimization exemption | Service survival | Settings trip |
 
 **Onboarding is staged, not front-loaded.** Microphone plus notifications produce a working
-notify-level app on day one. Overlay and DND are offered later, in context, as upgrades to the
-response — each requested at the moment the parent configures the feature that needs it. The
+notify-level app on day one. Overlay access is offered later, in context, as an upgrade to the
+response, and the battery exemption only once there is evidence the service is being killed. The
 settings screen shows which response channels are unlocked and what each still needs.
 
 ---
@@ -680,7 +679,7 @@ touched only for final measurement.
   Committed only with consent, and never real family audio in a public repository — see §11.
 - **Enrollment tests:** clip quality acceptance and rejection, centroid math, negative examples.
 - **Android instrumentation:** service lifecycle across screen on/off, permission revocation
-  mid-run, overlay rendering, DND acquisition and release.
+  mid-run, overlay rendering, audio-focus acquisition and release.
 - **Battery measurement:** a measured target, not an aspiration. Budget defined during planning.
 - **Manual field testing:** real households, since the failure modes that matter — siblings, TV,
   video calls — do not reproduce on a desk.
@@ -693,9 +692,12 @@ touched only for final measurement.
 2. Specific model selection and license verification for the VAD and embedding models. sherpa-onnx
    redistributes WeSpeaker, 3D-Speaker, and NeMo models under their respective upstream licenses —
    each candidate must be checked individually before it ships, not assumed permissive.
-3. Multi-child support in v1, or single child with the schema ready for more? Note that §5 requires
-   multi-*profile* support regardless, since siblings and the parent are enrolled as non-targets — so
-   the marginal cost of multi-child is now small.
+3. ~~Multi-child support in v1?~~ **Resolved 2026-08-16: no.** One active target child at a time,
+   switchable in settings. Multi-*profile* support stays — siblings and the parent are still enrolled
+   as non-targets, which is what makes relative scoring work. What is out is *simultaneous*
+   recognition of two targets, which the engine cannot do anyway: a second `TARGET_CHILD` profile
+   lands in the cohort and actively suppresses the first. A household must therefore reject a second
+   target rather than silently degrade.
 4. Minimum Android API level.
 5. Distribution intent: personal use, open source, or App/Play Store release? This determines
    whether the Family Controls entitlement request and store-review preparation are in scope.
