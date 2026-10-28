@@ -148,4 +148,91 @@ class EnrollmentServiceTest {
             EnrollmentPolicy(requiredLanguages = emptySet())
         }
     }
+
+    private fun enrolled(): VoiceProfile {
+        val result = service.enroll(
+            personId = "maya",
+            role = VoiceProfile.Role.TARGET_CHILD,
+            clips = listOf(
+                clip(Language.ENGLISH, 150.0, 1f, 0f),
+                enough(Language.HEBREW, 0f, 1f),
+            ),
+        )
+        return assertIs<EnrollmentResult.Complete>(result).profile
+    }
+
+    @Test
+    fun `a top-up merges into the existing centroid weighted by speech seconds`() {
+        // 150 s of (1, 0) already enrolled; a 50 s session of (0, 1) pulls it a quarter of the way.
+        val result = service.topUp(enrolled(), listOf(clip(Language.ENGLISH, 50.0, 0f, 1f)))
+
+        val merged = assertIs<EnrollmentResult.Complete>(result).profile
+        val expected = Embedding.ofNormalized(floatArrayOf(3f, 1f))
+        assertTrue(cosine(expected, merged.centroids.getValue(Language.ENGLISH)) > 0.9999f)
+        assertEquals(200.0, merged.enrolledSecondsByLanguage[Language.ENGLISH])
+    }
+
+    @Test
+    fun `a top-up leaves languages it has no clips for untouched`() {
+        val existing = enrolled()
+
+        val result = service.topUp(existing, listOf(clip(Language.ENGLISH, 10.0, 0f, 1f)))
+
+        val merged = assertIs<EnrollmentResult.Complete>(result).profile
+        assertTrue(merged.centroids[Language.HEBREW] === existing.centroids[Language.HEBREW])
+        assertEquals(50.0, merged.enrolledSecondsByLanguage[Language.HEBREW])
+    }
+
+    @Test
+    fun `a top-up keeps every not-them correction`() {
+        val corrected = enrolled().withNegatives(listOf(Embedding.ofNormalized(floatArrayOf(1f, 1f))))
+
+        val result = service.topUp(corrected, listOf(enough(Language.ENGLISH, 1f, 0f)))
+
+        val merged = assertIs<EnrollmentResult.Complete>(result).profile
+        assertEquals(corrected.negatives, merged.negatives)
+        assertEquals(VoiceProfile.Role.TARGET_CHILD, merged.role)
+    }
+
+    @Test
+    fun `a top-up can complete a language the first session left short`() {
+        val partial = assertIs<EnrollmentResult.Incomplete>(
+            service.enroll(
+                personId = "maya",
+                role = VoiceProfile.Role.TARGET_CHILD,
+                clips = listOf(enough(Language.ENGLISH, 1f, 0f), clip(Language.HEBREW, 30.0, 0f, 1f)),
+            ),
+        )
+
+        val result = service.topUp(assertNotNull(partial.profile), listOf(clip(Language.HEBREW, 20.0, 0f, 1f)))
+
+        assertIs<EnrollmentResult.Complete>(result)
+    }
+
+    @Test
+    fun `a top-up can add a language the profile never had`() {
+        val englishOnly = assertNotNull(
+            assertIs<EnrollmentResult.Incomplete>(
+                service.enroll("maya", VoiceProfile.Role.TARGET_CHILD, listOf(enough(Language.ENGLISH, 1f, 0f))),
+            ).profile,
+        )
+
+        val result = service.topUp(englishOnly, listOf(enough(Language.HEBREW, 0f, 1f)))
+
+        val merged = assertIs<EnrollmentResult.Complete>(result).profile
+        assertEquals(setOf(Language.ENGLISH, Language.HEBREW), merged.languages)
+    }
+
+    @Test
+    fun `a top-up refuses a profile whose sessions cannot be weighted`() {
+        val noSeconds = VoiceProfile(
+            personId = "maya",
+            role = VoiceProfile.Role.TARGET_CHILD,
+            centroids = mapOf(Language.ENGLISH to Embedding.ofNormalized(floatArrayOf(1f, 0f))),
+        )
+
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            service.topUp(noSeconds, listOf(enough(Language.ENGLISH, 0f, 1f)))
+        }
+    }
 }

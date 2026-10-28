@@ -150,4 +150,58 @@ class DetectionEngineTest {
         assertTrue(seen.size >= 2, "expected several observations, got ${seen.size}")
         assertTrue(seen.all { it.logLikelihoodRatio > 0f }, "target audio should score positive")
     }
+
+    @Test
+    fun `a detection carries the embeddings that caused it`() {
+        val fired = assertNotNull(feed(engine(), ::targetFrame))
+
+        assertTrue(fired.evidenceEmbeddings.size >= 2, "got ${fired.evidenceEmbeddings.size}")
+        val targetVoice = Embedding.ofNormalized(floatArrayOf(1f, 0f, 0f))
+        assertTrue(fired.evidenceEmbeddings.all { cosine(it, targetVoice) > 0.999f })
+    }
+
+    @Test
+    fun `a detection omits embeddings that argued against the target`() {
+        val subject = engine()
+
+        // The parent speaks first; their negative evidence stays in the window the target
+        // eventually fires on, but it is not a reason the detection happened.
+        repeat(100) { subject.accept(parentFrame()) }
+        val fired = assertNotNull(feed(subject, ::targetFrame, count = 400))
+
+        val targetVoice = Embedding.ofNormalized(floatArrayOf(1f, 0f, 0f))
+        assertTrue(fired.evidenceEmbeddings.isNotEmpty())
+        assertTrue(fired.evidenceEmbeddings.all { cosine(it, targetVoice) > 0.999f })
+    }
+
+    @Test
+    fun `dismissing restarts the cooldown from the moment of dismissal`() {
+        fun run(dismiss: Boolean): DetectionEvent? {
+            val subject = DetectionEngine(
+                vadGate = VadGate(SpeechWhenAudible()),
+                embedder = FakeEmbedder(),
+                matcher = HouseholdMatcher(maya, listOf(parent, sibling)),
+                accumulator = EvidenceAccumulator(AccumulatorConfig(cooldownMs = 10_000)),
+                targetPersonId = "maya",
+            )
+            // ~4.8 s of the target, then silence to 12 s. The second segment closes, and so
+            // fires, only once the silence ends it.
+            val talking = feed(subject, ::targetFrame, count = 150)
+            val quiet = feed(subject, { FloatArray(512) }, count = 225)
+            assertNotNull(talking ?: quiet, "the first episode should fire")
+            if (dismiss) subject.onDismissed()
+            // ~9.6 s more of the target. The original cooldown lapsed at ~15 s, so this fires
+            // unless the dismissal pushed the cooldown out to 22 s.
+            return feed(subject, ::targetFrame, count = 300)
+        }
+
+        assertNotNull(run(dismiss = false), "without a dismissal the second episode fires")
+        assertNull(run(dismiss = true), "a dismissal at 12 s must hold the app quiet until 22 s")
+    }
+}
+
+/** Speech whenever the frame is not silent, so tests can interleave talking and quiet. */
+private class SpeechWhenAudible(override val frameSize: Int = 512) : VoiceActivityDetector {
+    override fun speechProbability(frame: FloatArray) = if (frame.any { it != 0f }) 0.99f else 0.01f
+    override fun reset() = Unit
 }

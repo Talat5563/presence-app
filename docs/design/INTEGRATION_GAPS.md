@@ -36,6 +36,11 @@ What follows from it:
   score, so two enrolled targets make the app worse at detecting either one. Both the app and the
   harness need to refuse it with an explanation, not accept it and quietly get worse. The harness
   already logs a household lacking a target; it must equally refuse one with two.
+  **Enforced (2026-10-28).** `HouseholdMatcher` requires its target to have role `TARGET_CHILD`
+  and refuses a cohort containing another one. `TARGET_CHILD` therefore means "the child currently
+  listened for": switching children re-roles the previous target as `SIBLING`, which keeps them in
+  the cohort, where they help. The harness skips, with a warning, any household whose manifest
+  labels more than one speaker `target_child`.
 - **Settings needs "which child am I listening for?"** rather than a multi-select — a switch between
   enrolled children, one active at a time. Screen 21 currently implies a list of equals.
 
@@ -57,6 +62,9 @@ if that string is ever rewritten to sound more decisive.
 
 ## Engine gaps — real, and Phase 0's to own
 
+**E1, E2, E3 and D1's enforcement were fixed on 2026-10-28** (branch `engine-gaps-e1-e3`). Each
+section below keeps its original description, followed by what was done. E4–E6 remain open.
+
 ### E1 — "Not them" has no data path (Critical)
 
 `VoiceProfile.negatives` and `MatcherConfig.negativeVetoMargin` both exist and work. But **the
@@ -71,6 +79,13 @@ Fix is small: carry the observation's `Embedding` on `DetectionEvent`, or expose
 existing observation listener. It must be decided before Phase 6, because it changes a type the
 whole app binds to.
 
+**Fixed.** `DetectionEvent.evidenceEmbeddings` carries every *positive-evidence* observation in the
+window that fired — not just the last one, and not the observations that argued against the target,
+which would teach the profile to reject its own voice. The accumulator now returns a `Firing` with
+its contributors. On "not them" the app calls `VoiceProfile.withNegatives(event.evidenceEmbeddings)`,
+which keeps the newest 50 negatives (about 50 KB) and drops the oldest. The embeddings are
+biometric: they go into the profile or nowhere, never into the event log.
+
 ### E2 — Additive re-enrollment cannot work (Critical)
 
 Spec §4.1 L4: *"Multiple enrollment sessions over time are retained and merged rather than
@@ -83,6 +98,12 @@ correction the parent had made.
 
 Needs either retained per-language counts on `VoiceProfile` (to merge means correctly) or retained
 clip embeddings. The first is cheaper and sufficient.
+
+**Fixed.** `EnrollmentService.topUp(existing, clips)` merges each language's centroid as a mean
+weighted by speech seconds, using the `enrolledSecondsByLanguage` the profile already records, and
+keeps every negative. Newer sessions get no extra weight: a decay rate would be invented until Phase
+1's re-record measures drift. Merging re-normalized centroids is a close approximation of
+re-centroiding every clip, not an exact one; see `weightedCentroidOf`.
 
 ### E3 — Cooldown: 45 s in the design, 60 s in the engine
 
@@ -97,6 +118,11 @@ notes), and the design's timing copy should reflect it.
 Also: cooldown starts at **fire**, not at dismissal. The design's claim that "a dismissal does not
 let it immediately reappear" has no mechanism behind it — dismissal is not wired to the accumulator
 at all. If that behaviour is wanted, it is engine work.
+
+**Fixed.** The default is now 45 s, matching the design. `DetectionEngine.onDismissed()` restarts
+the cooldown from the current stream position and discards accumulated evidence. A restart can only
+extend suppression, never shorten it. The app should call it for both "dismiss" and "not them".
+Screen 14's copy in `screens.md` now describes the cooldown-plus-fresh-evidence behaviour.
 
 ### E4 — Detection latency floor is ~4.5 s
 
@@ -165,3 +191,6 @@ document's central bidirectional case.
 Phase 6's plan must open with D1 and D2 answered, and with E1–E3 fixed in the engine — they are
 small, but each changes a type or a constant the whole app binds to, and finding them mid-build
 would be expensive. E1 in particular gates a control the design treats as central.
+
+As of 2026-10-28 all five are done. E5 (wall-clock time on events) and E6 still change types the
+app binds to, but each is naturally part of Phase 6's persistence and enrollment work.

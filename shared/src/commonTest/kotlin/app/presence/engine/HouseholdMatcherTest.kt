@@ -169,4 +169,31 @@ class HouseholdMatcherTest {
         }
         assertTrue(failure.message!!.contains("cohort"))
     }
+
+    @Test
+    fun `a second target child in the cohort is rejected`() {
+        val noa = profile("noa", VoiceProfile.Role.TARGET_CHILD, Language.ENGLISH to floatArrayOf(0f, 0f, 1f))
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            HouseholdMatcher(maya, listOf(parent, noa))
+        }
+        assertTrue(failure.message!!.contains("noa"))
+    }
+
+    @Test
+    fun `a target without the target role is rejected`() {
+        assertFailsWith<IllegalArgumentException> {
+            HouseholdMatcher(sibling, listOf(parent, maya.copy(role = VoiceProfile.Role.SIBLING)))
+        }
+    }
+
+    @Test
+    fun `switching children means re-roling the previous target as a sibling`() {
+        val noa = profile("noa", VoiceProfile.Role.TARGET_CHILD, Language.ENGLISH to floatArrayOf(0f, 0f, 1f))
+        val switched = HouseholdMatcher(noa, listOf(parent, maya.copy(role = VoiceProfile.Role.SIBLING)))
+
+        // Maya now argues against Noa rather than for herself.
+        assertTrue(switched.score(observation(1f, 0f, 0f)).logLikelihoodRatio < 0f)
+        assertTrue(switched.score(observation(0f, 0f, 1f)).logLikelihoodRatio > 3f)
+    }
 }

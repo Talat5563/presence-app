@@ -52,6 +52,9 @@ class VadGate(
     private var consumedSamples = 0L
     private var segmentStart = 0L
 
+    /** Samples fed since construction or the last [reset] — the stream position timestamps use. */
+    val consumedSampleCount: Long get() = consumedSamples
+
     /** Feeds one frame. Returns a segment if one completed on this frame. */
     fun accept(frame: FloatArray): SpeechSegment? {
         val probability = vad.speechProbability(frame)

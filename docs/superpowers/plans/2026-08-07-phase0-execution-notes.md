@@ -121,8 +121,9 @@ Deliberately deferred. None blocks a dev-set measurement.
   quietly changes those denominators.
 - A file skipped for a bad format also drops its events from `totalEvents`, shrinking the
   denominator with only a warning line.
-- A second `TARGET_CHILD` speaker in one household would land in the cohort and crush the target's
-  score. Nothing rejects it.
+- ~~A second `TARGET_CHILD` speaker in one household would land in the cohort and crush the
+  target's score. Nothing rejects it.~~ Fixed 2026-10-28: `HouseholdMatcher` refuses it, and the
+  harness skips such a household with a warning.
 - `Csv` does not strip a UTF-8 BOM, so an Excel export fails with a confusing "missing required
   columns: path". Fails loudly, so it is safe — just unhelpful.
 

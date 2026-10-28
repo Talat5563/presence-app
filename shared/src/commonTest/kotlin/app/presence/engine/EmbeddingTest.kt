@@ -123,4 +123,35 @@ class EmbeddingTest {
 
         assertFailsWith<IllegalArgumentException> { centroidOf(listOf(forward, backward)) }
     }
+
+    @Test
+    fun `a weighted centroid leans toward the heavier input`() {
+        val x = Embedding.ofNormalized(floatArrayOf(1f, 0f))
+        val y = Embedding.ofNormalized(floatArrayOf(0f, 1f))
+
+        val centroid = weightedCentroidOf(listOf(x to 3.0, y to 1.0))
+
+        // Direction (3, 1), normalized.
+        assertClose(3f / sqrt(10f), centroid.values[0])
+        assertClose(1f / sqrt(10f), centroid.values[1])
+    }
+
+    @Test
+    fun `a zero-weight input does not move the weighted centroid`() {
+        val x = Embedding.ofNormalized(floatArrayOf(1f, 0f))
+        val y = Embedding.ofNormalized(floatArrayOf(0f, 1f))
+
+        val centroid = weightedCentroidOf(listOf(x to 5.0, y to 0.0))
+
+        assertClose(1f, cosine(centroid, x))
+    }
+
+    @Test
+    fun `a weighted centroid needs a positive weight and no negative ones`() {
+        val x = Embedding.ofNormalized(floatArrayOf(1f, 0f))
+
+        assertFailsWith<IllegalArgumentException> { weightedCentroidOf(listOf(x to 0.0)) }
+        assertFailsWith<IllegalArgumentException> { weightedCentroidOf(listOf(x to 1.0, x to -1.0)) }
+        assertFailsWith<IllegalArgumentException> { weightedCentroidOf(emptyList()) }
+    }
 }

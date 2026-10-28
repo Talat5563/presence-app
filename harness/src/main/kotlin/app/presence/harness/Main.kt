@@ -134,6 +134,19 @@ fun main(argv: Array<String>) {
             var traced = 0
 
             for ((householdId, householdRecordings) in recordings.groupBy { it.householdId }) {
+                // Checked on the manifest, not on the enrolled profiles: if one of two targets
+                // failed to enrol, the other child's recordings would still be scored as positives.
+                val targetSpeakers = householdRecordings
+                    .filter { it.role == RecordingRole.TARGET_CHILD }
+                    .map { it.speakerId }
+                    .distinct()
+                if (targetSpeakers.size > 1) {
+                    val message = "SKIP household $householdId: $targetSpeakers are all target " +
+                        "children — v1 listens for one; label the others SIBLING"
+                    println(message)
+                    warnings += message
+                    continue
+                }
                 val split = Evaluation.splitCorpus(householdRecordings)
                 val profiles = enrolProfiles(split.enrollment, manifestDir, vad, embedder, warnings)
                 val target = profiles.firstOrNull { it.role == VoiceProfile.Role.TARGET_CHILD }

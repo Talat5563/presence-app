@@ -69,3 +69,26 @@ fun centroidOf(embeddings: List<Embedding>): Embedding {
     }
     return Embedding.ofNormalized(FloatArray(dimension) { accumulator[it].toFloat() })
 }
+
+/**
+ * The weighted mean of [weighted] embeddings, re-normalized to unit length.
+ *
+ * Used to merge enrollment sessions, each weighted by its seconds of speech. Merging centroids
+ * this way approximates, but does not exactly equal, the centroid of every original clip: each
+ * centroid was re-normalized, losing the magnitude that recorded how tightly its clips agreed.
+ * The difference is small, and retaining every clip embedding to avoid it is not worth the cost.
+ */
+fun weightedCentroidOf(weighted: List<Pair<Embedding, Double>>): Embedding {
+    require(weighted.isNotEmpty()) { "cannot build a centroid from zero embeddings" }
+    require(weighted.all { (_, weight) -> weight >= 0.0 }) { "weights must not be negative" }
+    require(weighted.any { (_, weight) -> weight > 0.0 }) { "at least one weight must be positive" }
+    val dimension = weighted.first().first.dimension
+    val accumulator = DoubleArray(dimension)
+    for ((embedding, weight) in weighted) {
+        require(embedding.dimension == dimension) {
+            "dimension mismatch in centroid input: expected $dimension, got ${embedding.dimension}"
+        }
+        for (i in 0 until dimension) accumulator[i] += embedding.values[i] * weight
+    }
+    return Embedding.ofNormalized(FloatArray(dimension) { accumulator[it].toFloat() })
+}
