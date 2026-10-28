@@ -4,6 +4,7 @@ import app.presence.audio.SAMPLE_RATE_HZ
 import app.presence.domain.Language
 import app.presence.domain.VoiceProfile
 import app.presence.engine.DetectionEngine
+import app.presence.engine.Embedding
 import app.presence.engine.EvidenceAccumulator
 import app.presence.engine.HouseholdMatcher
 import app.presence.engine.SpeakerEmbedder
@@ -27,7 +28,7 @@ private const val USAGE = """
 Phase 0 accuracy harness.
 
 Usage:
-  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--threshold N] [--input-name N] [--output-name N]"
+  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--threshold N] [--input-name N] [--output-name N] [--embeddings FILE]"
 
   --manifest DIR     directory containing recordings.csv and events.csv; audio paths are
                      resolved relative to it
@@ -46,6 +47,8 @@ Usage:
                      sweep is used instead) in --evaluate dev.
   --input-name N     embedding model input tensor name (default: feats)
   --output-name N    embedding model output tensor name (default: embs)
+  --embeddings FILE  also write every enrollment-clip and observation embedding to FILE (CSV),
+                     for trying scoring changes offline without re-embedding the audio
 
 Caveat: a detection in an unlabelled recording — including a target-child recording with no
 labelled events at all — counts as a false alarm. That is the right default for an unlabelled
@@ -120,6 +123,7 @@ fun main(argv: Array<String>) {
             if (targetsWithoutEvents.size > 5) ", ..." else ""
     }
 
+    val dump = args["embeddings"]?.let { EmbeddingDump(Path.of(it)) }
     SileroVad(OnnxModelSession(modelsDir.resolve("silero_vad.onnx"))).use { vad ->
         OnnxSpeakerEmbedder(
             OnnxModelSession(modelsDir.resolve("speaker_embedding.onnx")),
@@ -148,7 +152,7 @@ fun main(argv: Array<String>) {
                     continue
                 }
                 val split = Evaluation.splitCorpus(householdRecordings)
-                val profiles = enrolProfiles(split.enrollment, manifestDir, vad, embedder, warnings)
+                val profiles = enrolProfiles(split.enrollment, manifestDir, vad, embedder, warnings, dump)
                 val target = profiles.firstOrNull { it.role == VoiceProfile.Role.TARGET_CHILD }
                 if (target == null) {
                     val message = "SKIP household $householdId: no target child enrolled"
@@ -170,7 +174,7 @@ fun main(argv: Array<String>) {
                     // One bad file must not abort a multi-hour run and discard every trace
                     // computed so far — WavReader.read is designed to be caught per file.
                     try {
-                        traces += traceOf(recording, manifestDir, vad, embedder, target, cohort)
+                        traces += traceOf(recording, manifestDir, vad, embedder, target, cohort, dump)
                     } catch (failure: UnsupportedAudioException) {
                         val message = "$householdId: skipped ${recording.path} — ${failure.message}"
                         println("  $message")
@@ -180,6 +184,7 @@ fun main(argv: Array<String>) {
                     if (traced % 25 == 0) println("  ... $traced/$totalToTrace recordings traced")
                 }
             }
+            dump?.close()
 
             // dev sweeps and tunes; holdout measures once, on data never used for tuning.
             val evaluated = when (mode) {
@@ -242,6 +247,7 @@ private fun enrolProfiles(
     vad: SileroVad,
     embedder: SpeakerEmbedder,
     warnings: MutableList<String>,
+    dump: EmbeddingDump? = null,
 ): List<VoiceProfile> =
     enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
         // Runtime observations are VAD-trimmed windows of at most 3 s each; embedding a whole
@@ -267,9 +273,11 @@ private fun enrolProfiles(
             }
 
             segments.filter { it.durationMs >= 800 }.map { segment ->
+                val embedding = embedder.embed(segment.samples)
+                dump?.write("enroll", recording, timestampMs = 0, embedding)
                 EnrollmentClip(
                     language = language,
-                    embedding = embedder.embed(segment.samples),
+                    embedding = embedding,
                     speechSeconds = segment.samples.size / SAMPLE_RATE_HZ.toDouble(),
                 )
             }
@@ -302,14 +310,22 @@ private fun traceOf(
     embedder: SpeakerEmbedder,
     target: VoiceProfile,
     cohort: List<VoiceProfile>,
+    dump: EmbeddingDump? = null,
 ): Trace {
     val samples = WavReader.read(root.resolve(recording.path))
     val observations = ArrayList<TimedScore>()
 
+    // The engine embeds, then scores, then reports — so captured embeddings pair with
+    // observations by position.
+    val embedded = ArrayList<Embedding>()
+    val capturing = object : SpeakerEmbedder by embedder {
+        override fun embed(samples: FloatArray) = embedder.embed(samples).also { embedded += it }
+    }
+
     vad.reset()
     val engine = DetectionEngine(
         vadGate = VadGate(vad),
-        embedder = embedder,
+        embedder = if (dump != null) capturing else embedder,
         matcher = HouseholdMatcher(target, cohort),
         accumulator = EvidenceAccumulator(),
         targetPersonId = target.personId,
@@ -320,11 +336,19 @@ private fun traceOf(
     for (frame in framer.push(samples)) engine.accept(frame)
     engine.flush()
 
+    if (dump != null) {
+        check(embedded.size == observations.size) {
+            "${recording.path}: ${embedded.size} embeddings for ${observations.size} observations"
+        }
+        observations.forEachIndexed { index, timed -> dump.write("obs", recording, timed.timestampMs, embedded[index]) }
+    }
+
     return Trace(recording, observations, samples.size.toDouble() / SAMPLE_RATE_HZ)
 }
 
 private val KNOWN_FLAGS = setOf(
     "help", "manifest", "models", "out", "holdout", "evaluate", "threshold", "input-name", "output-name",
+    "embeddings",
 )
 
 internal fun parseArgs(argv: Array<String>): Map<String, String> = parseFlags(argv, KNOWN_FLAGS)

@@ -24,6 +24,9 @@ class Embedding private constructor(
 
     val dimension: Int get() = values.size
 
+    /** A copy of the unit-length components, for diagnostics and export. Not for the hot path. */
+    fun toFloatArray(): FloatArray = values.copyOf()
+
     companion object {
         /** Normalizes [values] to unit length. The input array is not modified. */
         fun ofNormalized(values: FloatArray): Embedding {

@@ -57,12 +57,29 @@ child and a parent, is not in these embeddings. Threshold and gate tuning (Phase
 it. The lever is the one the roadmap already names — **Phase 3, fine-tuning on children's speech**
 — with the wake-phrase channel (Phase 7) as the fallback if that also fails.
 
-Two cheap things are still worth trying before or alongside Phase 3, since both are engineering
-rather than research:
+## Score normalization does not rescue it
 
-- **Score normalization.** The father's centroid attracts most of the children's speech — a
-  classic hub. Centering embeddings on the household mean, or adaptive score normalization, is
-  standard practice and may recover some adult-vs-child separation. It will not fix child-vs-child.
+The father's centroid attracting most of the children's speech looked like a hub, which score
+normalization often fixes. Tried offline on the slice's dumped embeddings
+(`--embeddings`, then `tools/experiments/normalization.py`), fitting every normalization on
+enrollment data only. The replay reproduces the harness report exactly at baseline. The absolute
+gate is disabled for every variant here, since several change the score scale it assumes:
+
+| Variant | AUC target vs all | AUC vs Mark | Best operating points |
+|---|---:|---:|---|
+| Baseline | 0.566 | 0.533 | 5.7% detection at 1.1 FA/h |
+| Centered on household mean | 0.558 | 0.525 | 15% at 3.1 FA/h; 26% at 4.3 FA/h |
+| Z-norm per centroid | 0.617 | 0.539 | no detections at any threshold |
+| Centered + WCCN (best regularisation) | 0.641 | 0.541 | 5% at 1.8 FA/h |
+
+Even ITERATE needs at least 50% detection at no more than 2 FA/h. Centering only moves the operating point (its AUC does
+not improve); whitening separates the target from everyone a little better, but Ross against Mark
+stays at chance under every variant. Normalization was therefore **not** built into the engine:
+it would add complexity for no usable gain.
+
+## What remains
+
+- **Phase 3, fine-tuning on children's speech**, is the lever this evidence points to.
 - **Better audio.** Part of the loss is the 1980s channel. Gleason (no siblings in most families)
   and BermanLong (Hebrew) are still to be measured, and nothing substitutes for recordings made on
   a phone in a real home (Phase 1).

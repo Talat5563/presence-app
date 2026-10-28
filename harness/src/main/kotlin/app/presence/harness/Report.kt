@@ -1,5 +1,10 @@
 package app.presence.harness
 
+import app.presence.engine.Embedding
+import java.nio.file.Path
+import kotlin.io.path.bufferedWriter
+import kotlin.io.path.createDirectories
+
 object Report {
 
     fun markdown(outcomes: List<Outcome>, provenance: String, warnings: List<String> = emptyList()): String =
@@ -97,4 +102,31 @@ object Report {
         val rounded = kotlin.math.round(value * 1000) / 10
         return "$rounded%"
     }
+}
+
+/**
+ * Writes raw embeddings as CSV: `kind,path,household_id,speaker_id,role,language,timestamp_ms`
+ * followed by one column per dimension. `kind` is `enroll` for an enrollment clip or `obs` for a
+ * scored observation. With these, a scoring change can be tried offline in seconds instead of
+ * re-embedding hours of audio.
+ */
+class EmbeddingDump(path: Path) : AutoCloseable {
+    private val writer = path.also { it.parent?.createDirectories() }.bufferedWriter()
+    private var headerWritten = false
+
+    fun write(kind: String, recording: Recording, timestampMs: Long, embedding: Embedding) {
+        val values = embedding.toFloatArray()
+        if (!headerWritten) {
+            writer.write("kind,path,household_id,speaker_id,role,language,timestamp_ms," + values.indices.joinToString(",") { "e$it" })
+            writer.newLine()
+            headerWritten = true
+        }
+        writer.write(
+            "$kind,${recording.path},${recording.householdId},${recording.speakerId},${recording.role.name.lowercase()}," +
+                "${recording.language?.name?.lowercase().orEmpty()},$timestampMs," + values.joinToString(","),
+        )
+        writer.newLine()
+    }
+
+    override fun close() = writer.close()
 }
