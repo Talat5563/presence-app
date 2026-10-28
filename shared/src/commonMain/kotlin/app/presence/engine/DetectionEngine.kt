@@ -61,26 +61,39 @@ class DetectionEngine(
         accumulator.reset()
     }
 
+    /**
+     * The parent dismissed an intervention: restart the cooldown from now, so the app does not
+     * reappear the moment a cooldown counted from the original fire runs out.
+     */
+    fun onDismissed() {
+        accumulator.restartCooldown(toMillis(vadGate.consumedSampleCount))
+    }
+
     private fun process(segment: SpeechSegment): DetectionEvent? {
         if (segment.durationMs < config.minEmbedDurationMs) return null
 
         var event: DetectionEvent? = null
         for (window in windowsOf(segment.samples)) {
-            val score = matcher.score(embedder.embed(window.samples))
+            val embedding = embedder.embed(window.samples)
+            val score = matcher.score(embedding)
             val timestampMs = toMillis(segment.startSampleIndex + window.offsetSamples + window.samples.size)
             observationListener?.invoke(timestampMs, score)
-            val observation = Observation(timestampMs, score.logLikelihoodRatio)
-            val evidence = accumulator.accept(observation)
+            val firing = accumulator.accept(Observation(timestampMs, score.logLikelihoodRatio, embedding))
             // Only the first fire in a segment is returned, since accept() yields at most one
-            // event. Unreachable under the default 60 s cooldown, which far exceeds any segment,
+            // event. Unreachable under the default 45 s cooldown, which far exceeds any segment,
             // but a caller configuring a cooldown shorter than maxSegmentMs would have a second
             // within-segment detection coalesced into the first.
-            if (evidence != null && event == null) {
+            if (firing != null && event == null) {
                 event = DetectionEvent(
                     personId = targetPersonId,
                     timestampMs = timestampMs,
-                    accumulatedEvidence = evidence,
+                    accumulatedEvidence = firing.evidence,
                     peakSimilarity = score.targetSimilarity,
+                    // Observations that argued against the target are not why it fired, and
+                    // storing them as negatives would teach the profile to reject its own voice.
+                    evidenceEmbeddings = firing.contributors
+                        .filter { it.logLikelihoodRatio > 0f }
+                        .mapNotNull { it.embedding },
                 )
             }
         }

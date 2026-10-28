@@ -4,6 +4,7 @@ import app.presence.domain.Language
 import app.presence.domain.VoiceProfile
 import app.presence.engine.Embedding
 import app.presence.engine.centroidOf
+import app.presence.engine.weightedCentroidOf
 
 /**
  * One accepted piece of enrollment audio, already embedded.
@@ -69,12 +70,6 @@ class EnrollmentService(
         val byLanguage = clips.groupBy { it.language }
         val secondsByLanguage = byLanguage.mapValues { (_, group) -> group.sumOf { it.speechSeconds } }
 
-        val shortfall = policy.requiredLanguages
-            .associateWith { language ->
-                policy.minSecondsPerLanguage - (secondsByLanguage[language] ?: 0.0)
-            }
-            .filterValues { it > 0.0 }
-
         val profile = if (byLanguage.isEmpty()) {
             null
         } else {
@@ -86,6 +81,60 @@ class EnrollmentService(
                 enrolledSecondsByLanguage = secondsByLanguage,
             )
         }
+        return resultFor(profile, secondsByLanguage)
+    }
+
+    /**
+     * Merges a new enrollment session into [existing] rather than replacing it (spec §4.1 L4).
+     *
+     * Each language's centroid becomes the speech-seconds-weighted mean of the old centroid and
+     * the new session's, so a short top-up nudges a well-enrolled profile instead of overwriting
+     * it. Every "not them" negative is kept: re-enrolling must not quietly undo the parent's
+     * corrections.
+     *
+     * Sessions are weighted by speech alone, not by age. Favouring recent sessions would track a
+     * growing child better, but the decay rate would be a guess until Phase 1's re-record measures
+     * drift.
+     */
+    fun topUp(existing: VoiceProfile, clips: List<EnrollmentClip>): EnrollmentResult {
+        val unweighted = existing.languages - existing.enrolledSecondsByLanguage.keys
+        require(unweighted.isEmpty()) {
+            "profile '${existing.personId}' records no speech seconds for $unweighted, so its " +
+                "centroids cannot be weighted against a new session"
+        }
+
+        val session = clips.groupBy { it.language }
+        val sessionSeconds = session.mapValues { (_, group) -> group.sumOf { it.speechSeconds } }
+        val languages = existing.languages + session.keys
+
+        val centroids = languages.associateWith { language ->
+            val previous = existing.centroids[language]
+            val group = session[language]
+            when {
+                group == null -> previous!!
+                previous == null -> centroidOf(group.map { it.embedding })
+                else -> weightedCentroidOf(
+                    listOf(
+                        previous to existing.enrolledSecondsByLanguage.getValue(language),
+                        centroidOf(group.map { it.embedding }) to sessionSeconds.getValue(language),
+                    ),
+                )
+            }
+        }
+        val secondsByLanguage = languages.associateWith { language ->
+            (existing.enrolledSecondsByLanguage[language] ?: 0.0) + (sessionSeconds[language] ?: 0.0)
+        }
+
+        val profile = existing.copy(centroids = centroids, enrolledSecondsByLanguage = secondsByLanguage)
+        return resultFor(profile, secondsByLanguage)
+    }
+
+    private fun resultFor(profile: VoiceProfile?, secondsByLanguage: Map<Language, Double>): EnrollmentResult {
+        val shortfall = policy.requiredLanguages
+            .associateWith { language ->
+                policy.minSecondsPerLanguage - (secondsByLanguage[language] ?: 0.0)
+            }
+            .filterValues { it > 0.0 }
 
         return if (shortfall.isEmpty() && profile != null) {
             EnrollmentResult.Complete(profile)

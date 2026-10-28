@@ -90,8 +90,14 @@ data class MatcherConfig(
  * a fixed threshold; we have a known roster, which turns the question into "which of these
  * people does this most resemble" and attacks sibling confusion directly.
  *
+ * @param target the one child being listened for, whose role must be
+ *   [VoiceProfile.Role.TARGET_CHILD]. v1 listens for a single child at a time (design decision D1);
+ *   switching children means re-roling the previous target as a [VoiceProfile.Role.SIBLING].
  * @param cohort every other enrolled household member. Must not be empty: enrolling only the
  *   target child is a design error (spec §5), and this constructor is where that rule is enforced.
+ *   Must not contain a second [VoiceProfile.Role.TARGET_CHILD] either: in the cohort, that child
+ *   would suppress the first child's evidence while never producing any of their own, so a
+ *   household asking for two targets would silently get worse at detecting both.
  */
 class HouseholdMatcher(
     private val target: VoiceProfile,
@@ -99,8 +105,16 @@ class HouseholdMatcher(
     private val config: MatcherConfig = MatcherConfig(),
 ) {
     init {
+        require(target.role == VoiceProfile.Role.TARGET_CHILD) {
+            "target '${target.personId}' has role ${target.role}, not TARGET_CHILD"
+        }
         require(cohort.isNotEmpty()) {
             "cohort must not be empty: the parent and any siblings must be enrolled (spec §5)"
+        }
+        val otherTargets = cohort.filter { it.role == VoiceProfile.Role.TARGET_CHILD }.map { it.personId }
+        require(otherTargets.isEmpty()) {
+            "only one target child at a time: $otherTargets must be re-roled as SIBLING while " +
+                "'${target.personId}' is the target"
         }
     }
 

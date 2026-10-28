@@ -43,4 +43,22 @@ data class VoiceProfile(
     }
 
     val languages: Set<Language> get() = centroids.keys
+
+    /**
+     * A copy with [rejected] — typically a [DetectionEvent.evidenceEmbeddings] the parent marked
+     * "not them" — appended to [negatives], keeping only the newest [maxNegatives].
+     *
+     * The cap bounds storage and the per-observation veto cost. Dropping the oldest first is
+     * deliberate: a child's voice drifts, so the confusions that mattered a year ago are the
+     * least likely to matter now.
+     */
+    fun withNegatives(rejected: List<Embedding>, maxNegatives: Int = MAX_NEGATIVES): VoiceProfile {
+        require(maxNegatives > 0) { "maxNegatives must be positive" }
+        return copy(negatives = (negatives + rejected).takeLast(maxNegatives))
+    }
+
+    companion object {
+        /** About 50 KB per profile at 256 dimensions. */
+        const val MAX_NEGATIVES = 50
+    }
 }

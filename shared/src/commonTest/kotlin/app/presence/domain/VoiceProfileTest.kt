@@ -96,4 +96,46 @@ class VoiceProfileTest {
         }
         assertTrue(failure.message!!.contains("maya"))
     }
+
+    @Test
+    fun `rejected embeddings are appended to the negatives`() {
+        val existing = embedding(0f, 1f)
+        val profile = VoiceProfile(
+            personId = "maya",
+            role = VoiceProfile.Role.TARGET_CHILD,
+            centroids = mapOf(Language.ENGLISH to embedding(1f, 0f)),
+            negatives = listOf(existing),
+        )
+        val rejected = listOf(embedding(1f, 1f), embedding(1f, 2f))
+
+        assertEquals(listOf(existing) + rejected, profile.withNegatives(rejected).negatives)
+    }
+
+    @Test
+    fun `negatives are capped by dropping the oldest`() {
+        val oldest = embedding(0f, 1f)
+        val middle = embedding(1f, 1f)
+        val newest = embedding(1f, 2f)
+        val profile = VoiceProfile(
+            personId = "maya",
+            role = VoiceProfile.Role.TARGET_CHILD,
+            centroids = mapOf(Language.ENGLISH to embedding(1f, 0f)),
+            negatives = listOf(oldest),
+        )
+
+        val capped = profile.withNegatives(listOf(middle, newest), maxNegatives = 2)
+
+        assertEquals(listOf(middle, newest), capped.negatives)
+    }
+
+    @Test
+    fun `rejects a non-positive negatives cap`() {
+        val profile = VoiceProfile(
+            personId = "maya",
+            role = VoiceProfile.Role.TARGET_CHILD,
+            centroids = mapOf(Language.ENGLISH to embedding(1f, 0f)),
+        )
+
+        assertFailsWith<IllegalArgumentException> { profile.withNegatives(emptyList(), maxNegatives = 0) }
+    }
 }
