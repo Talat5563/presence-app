@@ -1,0 +1,64 @@
+# Training and benchmark scripts (Phase 3)
+
+Offline Python for fine-tuning and benchmarking the speaker model. The plan is
+[docs/superpowers/plans/2026-10-28-phase3-fine-tuning.md](../docs/superpowers/plans/2026-10-28-phase3-fine-tuning.md).
+Nothing here is part of the Gradle build. All data lives under the gitignored `data/` and
+results under `reports/`.
+
+Needs Python 3.10+ with numpy, and ffmpeg on the PATH. Run everything from the repository root
+with `python -I`.
+
+## Samrómur Children benchmark
+
+Samrómur Children is CC BY 4.0. Its one condition: do not attempt to identify any speaker.
+
+```bash
+# dev.tar.gz, test.tar.gz and metadata_{dev,test}.tsv from
+# https://huggingface.co/datasets/language-and-voice-lab/samromur_children (corpus/), unpacked so
+# that the audio sits in data/samromur/wav/{dev,test}/<speaker>/<audio_id>.flac
+python -I training/prepare_samromur_eval.py data/samromur test      # FLAC → 16 kHz WAV + test.list
+python -I training/make_trials.py data/samromur test                # trials_test.txt
+./gradlew :harness:embedFiles --args="--list data/samromur/test.list --models models --out reports/samromur-baseline/test-embeddings.csv"
+python -I training/score_trials.py reports/samromur-baseline/test-embeddings.csv data/samromur/trials_test.txt
+```
+
+`embedFiles` embeds through the app's own Kotlin front end and ONNX model, so these numbers
+describe what ships. Pass `--model other.onnx` to score a candidate beside the current model.
+
+## Baselines (Phase 3, Task 0) — current model
+
+Model: WeSpeaker `voxceleb_resnet34_LM`, adult-trained, as in `models/PROVENANCE.txt`.
+
+**Samrómur Children**, utterance against utterance. "Hard" non-targets are the same gender and at
+most a year apart in age; "random" are any other child.
+
+| Split | Speakers | Target trials | EER (hard) | EER (random) | minDCF 0.01 (hard) |
+|---|---:|---:|---:|---:|---:|
+| dev | 34 | 446 | 8.97% | 8.33% | 0.666 |
+| test | 625 (ages 6–16) | 1,989 | 11.26% | 9.05% | 0.876 |
+
+Dev is lopsided (one speaker holds 1,000 of its 1,489 utterances), so Task 4 selects on speakers
+held out from the training split instead.
+
+**CHILDES**, through the product harness: speaker episodes, default engine settings. FA is false
+alarms per hour.
+
+| Corpus | Ages | Episodes scored | Best detection | FA/h there | AUC child vs parents | AUC child vs sibling |
+|---|---|---:|---:|---:|---:|---:|
+| MacWhinney, Ross 4;00–4;05 | 4 | 367 | 5.7% | 1.1 | 0.57 | 0.53 |
+| MacWhinney, Ross 4;00–6;11 | 4–6 | 1,997 | 2.9% | 7.8 | — | — |
+| Gleason, 22 families | 2–5 | 557 (7 families skipped) | 8.1% | 0.35 | 0.89 | — |
+| BermanLong (Hebrew) | 1–3 | pending: media still downloading | | | | |
+
+Every row is FALL_BACK. The rows fail for different reasons:
+
+- **MacWhinney: the embedding.** The VAD hears Ross, but his speech scores closest to his own
+  centroid only 27% of the time, and against his brother it is at chance. This is what
+  fine-tuning targets.
+- **Gleason: the VAD and the gates, not the embedding.** When the child's speech is scored, it
+  separates from the parents well (AUC 0.89). But Silero rates only 13% of the children's episode
+  audio as speech, against 36% of the parents'. So 7 of 22 children could not be enrolled at all,
+  about 60% of episodes produced no observation, and the 0.35 absolute gate removed 37.5% of the
+  child's remaining positive evidence. Fine-tuning the speaker model cannot fix that.
+- **Samrómur** (clean read speech, ages 6–16) is far easier than either. Gains there will
+  overstate gains in a home.

@@ -75,6 +75,21 @@ training/                         Python, outside the Gradle build
 
 ### Task 0: Baselines first, on everything we will compare
 
+> **Done 2026-10-28, except BermanLong (media still downloading).** The results are in
+> [training/README.md](../../../training/README.md). Three findings change the rest of this plan:
+>
+> 1. **Samrómur test EER is 11.3% (hard) and 9.1% (random) already.** The adult model is not
+>    hopeless on clean read speech from older children. Gains on Samrómur will overstate gains in
+>    a home, so CHILDES and Phase 1 recordings stay the deciding evidence.
+> 2. **Samrómur dev is unusable for selection:** 34 speakers, one of them holding 1,000 of 1,489
+>    utterances. Task 4 instead holds out about 150 speakers from the training split as its dev set.
+> 3. **Gleason fails before the embedding.** Silero rates only 13% of 2–5-year-olds' episode audio
+>    as speech, against 36% for their parents. Seven children could not be enrolled at all, and
+>    the 0.35 absolute gate removes a third of the remaining child evidence. Speaker separation
+>    there is fine (AUC 0.89). **Fine-tuning the speaker model does not touch this.** It needs VAD
+>    and gate calibration for young children's speech, which is Phase 4 work brought forward. It
+>    can proceed in parallel with this plan, since it changes the engine and not the model.
+
 Fine-tuning is only worth something relative to a number measured the same way.
 
 - [ ] Score the **current** model on Samrómur dev and test trials (Task 3 builds them): EER, and
@@ -139,8 +154,9 @@ Fine-tuning is only worth something relative to a number measured the same way.
 - [ ] `kaggle_finetune.ipynb`: install the pinned WeSpeaker, run `prepare_samromur.py`, train with
       a checkpoint every epoch to `/kaggle/working` (sessions are time-limited, so the run must
       resume), average the last checkpoints, and export ONNX.
-- [ ] Select the epoch count and chunk length on **Samrómur dev EER**, not on test and not on
-      CHILDES.
+- [ ] Select the epoch count and chunk length on the EER of **speakers held out from the training
+      split** (about 150, stratified by age and gender), not on Samrómur's own dev split (too
+      lopsided, see Task 0), not on test, and not on CHILDES.
 - [ ] Download the exported `.onnx`, the config and the training log. Record the accelerator,
       wall-clock time and final dev EER.
 

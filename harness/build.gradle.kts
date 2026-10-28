@@ -32,6 +32,15 @@ tasks.register<JavaExec>("importChildes") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("embedFiles") {
+    description = "Embeds whole audio files with the shipping front end, for verification benchmarks."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("app.presence.harness.EmbedFiles")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    workingDir = rootProject.projectDir
+}
+
 // Same two-suite split as :shared — see Global Constraints.
 tasks.test {
     useJUnitPlatform {
