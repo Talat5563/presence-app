@@ -75,7 +75,8 @@ training/                         Python, outside the Gradle build
 
 ### Task 0: Baselines first, on everything we will compare
 
-> **Done 2026-10-28, except BermanLong (media still downloading).** The results are in
+> **Done 2026-10-28.** BermanLong (Hebrew) also falls back: it separates child from parents
+> (AUC 0.78) but not from other children (0.51). The results are in
 > [training/README.md](../../../training/README.md). Three findings change the rest of this plan:
 >
 > 1. **Samrómur test EER is 11.3% (hard) and 9.1% (random) already.** The adult model is not

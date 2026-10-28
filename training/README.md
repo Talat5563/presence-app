@@ -48,7 +48,7 @@ alarms per hour.
 | MacWhinney, Ross 4;00–4;05 | 4 | 367 | 5.7% | 1.1 | 0.57 | 0.53 |
 | MacWhinney, Ross 4;00–6;11 | 4–6 | 1,997 | 2.9% | 7.8 | — | — |
 | Gleason, 22 families | 2–5 | 557 (7 families skipped) | 8.1% | 0.35 | 0.89 | — |
-| BermanLong (Hebrew) | 1–3 | pending: media still downloading | | | | |
+| BermanLong (Hebrew), 4 children | 1–3 | 1,524 | 7.0% | 6.8 | 0.78 | 0.51 against other children |
 
 Every row is FALL_BACK. The rows fail for different reasons:
 
@@ -60,5 +60,10 @@ Every row is FALL_BACK. The rows fail for different reasons:
   audio as speech, against 36% of the parents'. So 7 of 22 children could not be enrolled at all,
   about 60% of episodes produced no observation, and the 0.35 absolute gate removed 37.5% of the
   child's remaining positive evidence. Fine-tuning the speaker model cannot fix that.
+- **BermanLong (Hebrew): both failures at once.** The child separates from the parents
+  (AUC 0.78) but not from other children: playmates and visitors, unenrolled, score at chance
+  (0.51), and half of their speech produces positive evidence for the target, which drives most
+  of the false alarms. As in Gleason, 55% of episodes yield no observation, and 70% of the rest
+  yield exactly one, which cannot reach the default threshold.
 - **Samrómur** (clean read speech, ages 6–16) is far easier than either. Gains there will
   overstate gains in a home.
