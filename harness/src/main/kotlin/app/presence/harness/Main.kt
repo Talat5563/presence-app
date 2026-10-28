@@ -4,11 +4,15 @@ import app.presence.audio.SAMPLE_RATE_HZ
 import app.presence.domain.Language
 import app.presence.domain.VoiceProfile
 import app.presence.engine.DetectionEngine
+import app.presence.engine.DetectionEngineConfig
 import app.presence.engine.Embedding
 import app.presence.engine.EvidenceAccumulator
 import app.presence.engine.HouseholdMatcher
+import app.presence.engine.MatcherConfig
 import app.presence.engine.SpeakerEmbedder
 import app.presence.engine.VadGate
+import app.presence.engine.VadGateConfig
+import app.presence.engine.VoiceActivityDetector
 import app.presence.enrollment.EnrollmentClip
 import app.presence.enrollment.EnrollmentPolicy
 import app.presence.enrollment.EnrollmentResult
@@ -28,7 +32,7 @@ private const val USAGE = """
 Phase 0 accuracy harness.
 
 Usage:
-  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--threshold N] [--input-name N] [--output-name N] [--embeddings FILE]"
+  ./gradlew :harness:run --args="--manifest DIR --models DIR --out DIR [--holdout h3,h4] [--evaluate dev|holdout] [--threshold N] [--input-name N] [--output-name N] [--embeddings FILE] [--vad S,E,H,M] [--min-embed MS] [--min-target-similarity LIST] [--vad-probes DIR]"
 
   --manifest DIR     directory containing recordings.csv and events.csv; audio paths are
                      resolved relative to it
@@ -49,6 +53,18 @@ Usage:
   --output-name N    embedding model output tensor name (default: embs)
   --embeddings FILE  also write every enrollment-clip and observation embedding to FILE (CSV),
                      for trying scoring changes offline without re-embedding the audio
+  --vad S,E,H,M      VAD gate start threshold, end threshold, hangover frames and minimum
+                     segment ms (default: the engine's, 0.5,0.35,8,400), for enrollment and
+                     detection alike
+  --min-embed MS     shortest segment embedded, for enrollment and detection alike (default: the
+                     engine's minEmbedDurationMs, 800)
+  --min-target-similarity LIST
+                     comma-separated values of the matcher's absolute gate to sweep alongside the
+                     thresholds (default: the engine's, 0.35). Replayed from cached scores, so a
+                     longer list costs seconds. Holdout mode takes exactly one.
+  --vad-probes DIR   replay Silero's probabilities from a :harness:vadProbes dump of this same
+                     manifest instead of running the model, so a --vad sweep costs only the
+                     embedding time
 
 Caveat: a detection in an unlabelled recording — including a target-child recording with no
 labelled events at all — counts as a false alarm. That is the right default for an unlabelled
@@ -110,6 +126,25 @@ fun main(argv: Array<String>) {
             "tuning on the data the holdout exists to protect."
     }
 
+    val vadConfig = args["vad"]?.let { raw ->
+        val parts = raw.split(",").map { it.trim() }
+        require(parts.size == 4) { "--vad expects START,END,HANGOVER,MIN_SEGMENT_MS, was '$raw'" }
+        VadGateConfig(
+            startThreshold = parts[0].toFloat(),
+            endThreshold = parts[1].toFloat(),
+            hangoverFrames = parts[2].toInt(),
+            minSegmentMs = parts[3].toLong(),
+        )
+    } ?: VadGateConfig()
+    val engineConfig = args["min-embed"]?.let { DetectionEngineConfig(minEmbedDurationMs = it.toLong()) }
+        ?: DetectionEngineConfig()
+    val gates: List<MatcherConfig?> = args["min-target-similarity"]
+        ?.split(",")?.map { MatcherConfig(minTargetSimilarity = it.trim().toFloat()) }
+        ?: listOf(null)
+    require(mode == "dev" || gates.size == 1) {
+        "--evaluate holdout measures one operating point: give --min-target-similarity one value"
+    }
+
     val warnings = mutableListOf<String>()
 
     val targetsWithoutEvents = recordings
@@ -124,7 +159,9 @@ fun main(argv: Array<String>) {
     }
 
     val dump = args["embeddings"]?.let { EmbeddingDump(Path.of(it)) }
-    SileroVad(OnnxModelSession(modelsDir.resolve("silero_vad.onnx"))).use { vad ->
+    val probes = args["vad-probes"]?.let { RecordedProbes(Path.of(it)) }
+    SileroVad(OnnxModelSession(modelsDir.resolve("silero_vad.onnx"))).use { silero ->
+        val vadFor: (Recording) -> VoiceActivityDetector = { probes?.forRecording(it) ?: silero }
         OnnxSpeakerEmbedder(
             OnnxModelSession(modelsDir.resolve("speaker_embedding.onnx")),
             inputName = args["input-name"] ?: "feats",
@@ -152,7 +189,9 @@ fun main(argv: Array<String>) {
                     continue
                 }
                 val split = Evaluation.splitCorpus(householdRecordings)
-                val profiles = enrolProfiles(split.enrollment, manifestDir, vad, embedder, warnings, dump)
+                val profiles = enrolProfiles(
+                    split.enrollment, manifestDir, vadFor, embedder, warnings, vadConfig, engineConfig, dump,
+                )
                 val target = profiles.firstOrNull { it.role == VoiceProfile.Role.TARGET_CHILD }
                 if (target == null) {
                     val message = "SKIP household $householdId: no target child enrolled"
@@ -174,7 +213,9 @@ fun main(argv: Array<String>) {
                     // One bad file must not abort a multi-hour run and discard every trace
                     // computed so far — WavReader.read is designed to be caught per file.
                     try {
-                        traces += traceOf(recording, manifestDir, vad, embedder, target, cohort, dump)
+                        traces += traceOf(
+                            recording, manifestDir, vadFor, embedder, target, cohort, vadConfig, engineConfig, dump,
+                        )
                     } catch (failure: UnsupportedAudioException) {
                         val message = "$householdId: skipped ${recording.path} — ${failure.message}"
                         println("  $message")
@@ -195,14 +236,14 @@ fun main(argv: Array<String>) {
             // pinned threshold chosen on dev — sweeping the holdout would be tuning on it.
             val thresholds = pinnedThreshold?.let { listOf(it) } ?: (2..20 step 2).map { it.toFloat() }
             val outcomes = buildList {
-                addAll(Evaluation.sweep(evaluated, events, thresholds, "ALL"))
-                addAll(Evaluation.sweep(evaluated, events, thresholds, "ENGLISH") {
+                addAll(Evaluation.sweep(evaluated, events, thresholds, "ALL", gates))
+                addAll(Evaluation.sweep(evaluated, events, thresholds, "ENGLISH", gates) {
                     it.language == Language.ENGLISH && !it.codeSwitched
                 })
-                addAll(Evaluation.sweep(evaluated, events, thresholds, "HEBREW") {
+                addAll(Evaluation.sweep(evaluated, events, thresholds, "HEBREW", gates) {
                     it.language == Language.HEBREW && !it.codeSwitched
                 })
-                addAll(Evaluation.sweep(evaluated, events, thresholds, "CODE_SWITCHED") { it.codeSwitched })
+                addAll(Evaluation.sweep(evaluated, events, thresholds, "CODE_SWITCHED", gates) { it.codeSwitched })
             }
 
             val provenanceFile = modelsDir.resolve("PROVENANCE.txt")
@@ -244,9 +285,11 @@ fun main(argv: Array<String>) {
 private fun enrolProfiles(
     enrollment: List<Recording>,
     root: Path,
-    vad: SileroVad,
+    vadFor: (Recording) -> VoiceActivityDetector,
     embedder: SpeakerEmbedder,
     warnings: MutableList<String>,
+    vadConfig: VadGateConfig,
+    engineConfig: DetectionEngineConfig,
     dump: EmbeddingDump? = null,
 ): List<VoiceProfile> =
     enrollment.groupBy { it.speakerId }.mapNotNull { (speakerId, group) ->
@@ -264,15 +307,16 @@ private fun enrolProfiles(
                 return@flatMap emptyList()
             }
 
+            val vad = vadFor(recording)
             vad.reset()
-            val vadGate = VadGate(vad)
+            val vadGate = VadGate(vad, vadConfig)
             val segments = buildList {
                 val framer = Framer(vad.frameSize)
                 for (frame in framer.push(samples)) vadGate.accept(frame)?.let { add(it) }
                 vadGate.flush()?.let { add(it) }
             }
 
-            segments.filter { it.durationMs >= 800 }.map { segment ->
+            segments.filter { it.durationMs >= engineConfig.minEmbedDurationMs }.map { segment ->
                 val embedding = embedder.embed(segment.samples)
                 dump?.write("enroll", recording, timestampMs = 0, embedding)
                 EnrollmentClip(
@@ -306,10 +350,12 @@ private fun enrolProfiles(
 private fun traceOf(
     recording: Recording,
     root: Path,
-    vad: SileroVad,
+    vadFor: (Recording) -> VoiceActivityDetector,
     embedder: SpeakerEmbedder,
     target: VoiceProfile,
     cohort: List<VoiceProfile>,
+    vadConfig: VadGateConfig,
+    engineConfig: DetectionEngineConfig,
     dump: EmbeddingDump? = null,
 ): Trace {
     val samples = WavReader.read(root.resolve(recording.path))
@@ -322,13 +368,15 @@ private fun traceOf(
         override fun embed(samples: FloatArray) = embedder.embed(samples).also { embedded += it }
     }
 
+    val vad = vadFor(recording)
     vad.reset()
     val engine = DetectionEngine(
-        vadGate = VadGate(vad),
+        vadGate = VadGate(vad, vadConfig),
         embedder = if (dump != null) capturing else embedder,
         matcher = HouseholdMatcher(target, cohort),
         accumulator = EvidenceAccumulator(),
         targetPersonId = target.personId,
+        config = engineConfig,
         observationListener = { timestampMs, score -> observations += TimedScore(timestampMs, score) },
     )
 
@@ -348,7 +396,7 @@ private fun traceOf(
 
 private val KNOWN_FLAGS = setOf(
     "help", "manifest", "models", "out", "holdout", "evaluate", "threshold", "input-name", "output-name",
-    "embeddings",
+    "embeddings", "vad", "min-embed", "min-target-similarity", "vad-probes",
 )
 
 internal fun parseArgs(argv: Array<String>): Map<String, String> = parseFlags(argv, KNOWN_FLAGS)

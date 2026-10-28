@@ -36,6 +36,8 @@ data class Outcome(
     val detectedEvents: Int,
     val totalEvents: Int,
     val latenciesMs: List<Long>,
+    /** The matcher's absolute gate this outcome was replayed at, or null for the engine default. */
+    val minTargetSimilarity: Float? = null,
 ) {
     /**
      * False alarms per hour of [negativeHours] exposure.

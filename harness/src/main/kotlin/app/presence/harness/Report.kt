@@ -31,13 +31,14 @@ object Report {
             appendLine("## Results")
             appendLine()
             appendLine(
-                "| Slice | Threshold | False alarms | Negative hours | FA/hour | Detection | " +
+                "| Slice | Gate | Threshold | False alarms | Negative hours | FA/hour | Detection | " +
                     "Total events | Miss rate | Median latency | Verdict |",
             )
-            appendLine("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+            appendLine("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
             for (outcome in outcomes) {
                 appendLine(
-                    "| ${outcome.label} | ${format(outcome.fireThreshold)} | ${outcome.falseAlarms} | " +
+                    "| ${outcome.label} | ${outcome.minTargetSimilarity?.let(::format) ?: "default"} | " +
+                        "${format(outcome.fireThreshold)} | ${outcome.falseAlarms} | " +
                         "${format(outcome.negativeHours)} | ${format(outcome.falseAlarmsPerHour)} | " +
                         "${percent(outcome.detectionRate)} | ${outcome.totalEvents} | " +
                         "${percent(outcome.missRate)} | " +
@@ -57,12 +58,12 @@ object Report {
 
     fun csv(outcomes: List<Outcome>): String = buildString {
         appendLine(
-            "label,threshold,false_alarms,negative_hours,false_alarms_per_hour," +
+            "label,min_target_similarity,threshold,false_alarms,negative_hours,false_alarms_per_hour," +
                 "detected_events,total_events,detection_rate,miss_rate,median_latency_ms,verdict",
         )
         for (o in outcomes) {
             appendLine(
-                "${o.label},${o.fireThreshold},${o.falseAlarms},${format(o.negativeHours)}," +
+                "${o.label},${o.minTargetSimilarity ?: ""},${o.fireThreshold},${o.falseAlarms},${format(o.negativeHours)}," +
                     "${format(o.falseAlarmsPerHour)},${o.detectedEvents},${o.totalEvents}," +
                     "${format(o.detectionRate)},${format(o.missRate)},${o.medianLatencyMs ?: ""},${o.verdict}",
             )

@@ -41,6 +41,15 @@ tasks.register<JavaExec>("embedFiles") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("vadProbes") {
+    description = "Records Silero's per-frame speech probability for a manifest, for offline VAD sweeps."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("app.presence.harness.VadProbes")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    workingDir = rootProject.projectDir
+}
+
 // Same two-suite split as :shared — see Global Constraints.
 tasks.test {
     useJUnitPlatform {

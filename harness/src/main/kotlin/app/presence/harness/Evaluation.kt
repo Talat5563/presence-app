@@ -3,15 +3,15 @@ package app.presence.harness
 import app.presence.engine.AccumulatorConfig
 import app.presence.engine.EvidenceAccumulator
 import app.presence.engine.MatchScore
+import app.presence.engine.MatcherConfig
 import app.presence.engine.Observation
 
 /**
  * A timestamp paired with the full [MatchScore] that produced it, not just the gated LLR the
  * accumulator consumes.
  *
- * Caching the whole score — rather than a bare [Observation] — is what would let a future sweep
- * replay [app.presence.engine.MatcherConfig.applyGates] at different gate settings without
- * re-embedding audio; today's sweep still only varies `fireThreshold`.
+ * Caching the whole score — rather than a bare [Observation] — is what lets a sweep replay
+ * [MatcherConfig.applyGates] at different gate settings without re-embedding audio.
  */
 data class TimedScore(val timestampMs: Long, val score: MatchScore)
 
@@ -57,6 +57,9 @@ object Evaluation {
     /**
      * Replays a fresh accumulator over cached traces at one threshold.
      *
+     * @param gates when given, each observation's evidence is recomputed from its raw LLR at these
+     *   gate settings instead of taken as scored. The harness enrols no "not them" negatives, so
+     *   there is no veto to replay and the result is exactly what the engine would have produced.
      * @param filter restricts which recordings count, for per-language slices. Spec §4.3 requires
      *   English, Hebrew and code-switched speech to be reported separately.
      */
@@ -65,6 +68,7 @@ object Evaluation {
         events: List<CallEvent>,
         threshold: Float,
         label: String,
+        gates: MatcherConfig? = null,
         filter: (Recording) -> Boolean = { true },
     ): Outcome {
         val selected = traces.filter { filter(it.recording) }
@@ -76,7 +80,10 @@ object Evaluation {
         for (trace in selected) {
             val accumulator = EvidenceAccumulator(AccumulatorConfig(fireThreshold = threshold))
             for (timed in trace.observations) {
-                val observation = Observation(timed.timestampMs, timed.score.logLikelihoodRatio)
+                val score = timed.score
+                val llr = gates?.applyGates(score.rawLogLikelihoodRatio, score.targetSimilarity, score.cohortZ, null)
+                    ?: score.logLikelihoodRatio
+                val observation = Observation(timed.timestampMs, llr)
                 if (accumulator.accept(observation) != null) {
                     detections += Detection(trace.recording.path, timed.timestampMs)
                 }
@@ -100,17 +107,19 @@ object Evaluation {
             detectedEvents = scoring.detected,
             totalEvents = scoring.total,
             latenciesMs = scoring.latenciesMs,
+            minTargetSimilarity = gates?.minTargetSimilarity,
         )
     }
 
-    /** Replays every threshold. Cheap, because the embeddings are already computed. */
+    /** Replays every gate setting at every threshold. Cheap, because the embeddings are already computed. */
     fun sweep(
         traces: List<Trace>,
         events: List<CallEvent>,
         thresholds: List<Float>,
         label: String = "ALL",
+        gates: List<MatcherConfig?> = listOf(null),
         filter: (Recording) -> Boolean = { true },
-    ): List<Outcome> = thresholds.map { replay(traces, events, it, label, filter) }
+    ): List<Outcome> = gates.flatMap { gate -> thresholds.map { replay(traces, events, it, label, gate, filter) } }
 }
 
 /**

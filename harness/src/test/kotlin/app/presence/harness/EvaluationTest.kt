@@ -2,6 +2,7 @@ package app.presence.harness
 
 import app.presence.domain.Language
 import app.presence.engine.MatchScore
+import app.presence.engine.MatcherConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -159,6 +160,43 @@ class EvaluationTest {
     }
 
     @Test
+    fun `replaying at a lower absolute gate restores evidence the default gate removed`() {
+        val positive = recording("call.wav", RecordingRole.TARGET_CHILD, ContentType.CALLING)
+        // Scored under the default 0.35 gate: the raw LLR favoured the target, but a target
+        // similarity of 0.3 zeroed it.
+        val gated = MatchScore(
+            targetSimilarity = 0.3f,
+            bestNonTargetSimilarity = 0f,
+            bestNonTargetPersonId = "parent",
+            cohortZ = 10f,
+            logLikelihoodRatio = 0f,
+            rawLogLikelihoodRatio = 4f,
+        )
+        val traces = listOf(Trace(positive, listOf(TimedScore(1_000, gated), TimedScore(2_000, gated)), 60.0))
+        val events = listOf(CallEvent("call.wav", 500, "maya"))
+
+        val asScored = Evaluation.replay(traces, events, threshold = 6f, label = "ALL")
+        val lowered = Evaluation.replay(
+            traces, events, threshold = 6f, label = "ALL", gates = MatcherConfig(minTargetSimilarity = 0.25f),
+        )
+
+        assertEquals(0, asScored.detectedEvents)
+        assertEquals(1, lowered.detectedEvents)
+        assertEquals(0.25f, lowered.minTargetSimilarity)
+    }
+
+    @Test
+    fun `the sweep crosses every gate setting with every threshold`() {
+        val negative = recording("tv.wav", RecordingRole.MEDIA, ContentType.SPONTANEOUS, "tv1")
+        val traces = listOf(trace(negative, 1_000L to 4f))
+        val gates = listOf(MatcherConfig(minTargetSimilarity = 0.35f), MatcherConfig(minTargetSimilarity = 0.2f))
+
+        val outcomes = Evaluation.sweep(traces, emptyList(), listOf(2f, 6f), gates = gates)
+
+        assertEquals(listOf(0.35f to 2f, 0.35f to 6f, 0.2f to 2f, 0.2f to 6f), outcomes.map { it.minTargetSimilarity to it.fireThreshold })
+    }
+
+    @Test
     fun `the sweep produces one outcome per threshold`() {
         val negative = recording("tv.wav", RecordingRole.MEDIA, ContentType.SPONTANEOUS, "tv1")
         val traces = listOf(trace(negative, 1_000L to 4f, 2_000L to 4f))
@@ -255,7 +293,7 @@ class EvaluationTest {
 
         val lines = csv.trim().lines()
         assertEquals(2, lines.size)
-        assertTrue(lines[0].startsWith("label,threshold"))
+        assertTrue(lines[0].startsWith("label,min_target_similarity,threshold"))
     }
 
     @Test
