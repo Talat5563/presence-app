@@ -64,6 +64,30 @@ object Report {
         }
     }
 
+    /**
+     * Every scored observation with the full [app.presence.engine.MatchScore] behind it, one row
+     * each. A verdict says *that* the system fails; this says *where* — which speakers produce
+     * positive evidence, how close the target sits to its own centroid, and which gate removed it.
+     */
+    fun observationsCsv(traces: List<Trace>): String = buildString {
+        appendLine(
+            "path,household_id,speaker_id,role,language,timestamp_ms,target_similarity," +
+                "best_non_target_similarity,best_non_target_id,cohort_z,raw_llr,llr",
+        )
+        for (trace in traces) {
+            val r = trace.recording
+            for (timed in trace.observations) {
+                val s = timed.score
+                appendLine(
+                    "${r.path},${r.householdId},${r.speakerId},${r.role.name.lowercase()}," +
+                        "${r.language?.name?.lowercase().orEmpty()},${timed.timestampMs}," +
+                        "${s.targetSimilarity},${s.bestNonTargetSimilarity},${s.bestNonTargetPersonId}," +
+                        "${s.cohortZ},${s.rawLogLikelihoodRatio},${s.logLikelihoodRatio}",
+                )
+            }
+        }
+    }
+
     private fun format(value: Number): String {
         val rounded = kotlin.math.round(value.toDouble() * 1000) / 1000
         return rounded.toString()

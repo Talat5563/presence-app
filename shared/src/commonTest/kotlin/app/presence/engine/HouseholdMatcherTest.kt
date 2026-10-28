@@ -196,4 +196,10 @@ class HouseholdMatcherTest {
         assertTrue(switched.score(observation(1f, 0f, 0f)).logLikelihoodRatio < 0f)
         assertTrue(switched.score(observation(0f, 0f, 1f)).logLikelihoodRatio > 3f)
     }
+
+    @Test
+    fun `reports which household member the observation most resembled`() {
+        assertEquals("sibling", matcher().score(observation(0f, 0.6f, 0.8f)).bestNonTargetPersonId)
+        assertEquals("parent", matcher().score(observation(0f, 0.8f, 0.6f)).bestNonTargetPersonId)
+    }
 }

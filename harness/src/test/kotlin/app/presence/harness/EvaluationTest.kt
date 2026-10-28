@@ -35,6 +35,7 @@ class EvaluationTest {
     private fun matchScore(llr: Float) = MatchScore(
         targetSimilarity = 1f,
         bestNonTargetSimilarity = 0f,
+        bestNonTargetPersonId = "parent",
         cohortZ = 10f,
         logLikelihoodRatio = llr,
         rawLogLikelihoodRatio = llr,

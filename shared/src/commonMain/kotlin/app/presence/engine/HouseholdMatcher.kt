@@ -9,6 +9,8 @@ import kotlin.math.sqrt
  * @param cohortZ how far the target's similarity stands above the rest of the household, in
  *   standard deviations. This is what distinguishes "it is the target" from "it is a stranger
  *   who happens to resemble the target slightly more than the others".
+ * @param bestNonTargetPersonId which household member [bestNonTargetSimilarity] belongs to: the
+ *   person this observation most resembled other than the target, for diagnosing confusions
  * @param logLikelihoodRatio the evidence this observation contributes. Positive favours the
  *   target; the accumulator sums these across segments.
  * @param rawLogLikelihoodRatio the closed-set LLR before the open-set gates and negative veto are
@@ -19,6 +21,7 @@ import kotlin.math.sqrt
 data class MatchScore(
     val targetSimilarity: Float,
     val bestNonTargetSimilarity: Float,
+    val bestNonTargetPersonId: String,
     val cohortZ: Float,
     val logLikelihoodRatio: Float,
     val rawLogLikelihoodRatio: Float,
@@ -121,7 +124,8 @@ class HouseholdMatcher(
     fun score(observation: Embedding): MatchScore {
         val targetSimilarity = bestSimilarity(target, observation)
         val cohortSimilarities = cohort.map { bestSimilarity(it, observation) }
-        val bestNonTarget = cohortSimilarities.max()
+        val bestIndex = cohortSimilarities.indices.maxBy { cohortSimilarities[it] }
+        val bestNonTarget = cohortSimilarities[bestIndex]
 
         val z = cohortZScore(targetSimilarity, cohortSimilarities)
         val raw = closedSetLogLikelihoodRatio(targetSimilarity, cohortSimilarities)
@@ -131,6 +135,7 @@ class HouseholdMatcher(
         return MatchScore(
             targetSimilarity = targetSimilarity,
             bestNonTargetSimilarity = bestNonTarget,
+            bestNonTargetPersonId = cohort[bestIndex].personId,
             cohortZ = z,
             logLikelihoodRatio = llr,
             rawLogLikelihoodRatio = raw,

@@ -206,7 +206,8 @@ fun main(argv: Array<String>) {
             outDir.createDirectories()
             outDir.resolve("report.md").writeText(Report.markdown(outcomes, provenance, warnings))
             outDir.resolve("results.csv").writeText(Report.csv(outcomes))
-            println("Wrote ${outDir.resolve("report.md")} and ${outDir.resolve("results.csv")}")
+            outDir.resolve("observations.csv").writeText(Report.observationsCsv(evaluated))
+            println("Wrote report.md, results.csv and observations.csv to $outDir")
 
             println()
             if (mode == "holdout") {
