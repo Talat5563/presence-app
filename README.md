@@ -16,10 +16,11 @@ Everything happens on the device. No account, no server, no audio ever uploaded.
 
 ## Status
 
-**Building Phase 0.** The detection engine and its evaluation harness are under construction on the
-`phase0-accuracy-harness` branch, following
-[the implementation plan](docs/superpowers/plans/2026-08-07-phase0-accuracy-harness.md). No UI, no
-Android code, and no iOS code yet — deliberately.
+**Phase 0 is built; nothing is measured yet.** The detection engine and its evaluation harness are
+merged, and the UI design handoff is in `docs/design/`. There is no corpus yet, so the go / no-go
+measurement (Phase 2) waits on recordings — see
+[the roadmap](docs/superpowers/plans/2026-08-08-roadmap.md). No Android code and no iOS code yet —
+deliberately.
 
 Phase 0 (spec §9) is a JVM harness that measures the detection *system* — not just the model —
 against public child-speech benchmarks and a household simulation set, before any UI is built.
@@ -91,7 +92,8 @@ Product requirements, not aspirations — each one testable:
 
 ## Running Phase 0
 
-Requires JDK 17 and Gradle 8.11.
+Requires only a JVM (11+) to run the Gradle wrapper; if no JDK 17 is installed, Gradle downloads one
+for the build.
 
 ```bash
 ./tools/fetch-models.sh                         # download models into models/ (gitignored)
