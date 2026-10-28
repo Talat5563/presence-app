@@ -12,6 +12,11 @@ import app.presence.engine.VoiceActivityDetector
  * outputs `output [B, 1]`, `stateN`.
  *
  * The model is recurrent, so state carries between frames and [reset] matters between recordings.
+ *
+ * **Each frame is sent with the previous frame's last [CONTEXT_SIZE] samples in front of it**, as
+ * Silero's own wrapper does. v5 was trained that way: fed bare 512-sample frames it still runs,
+ * but rates real speech close to zero. Synthetic signals could not reveal this, since they score
+ * near zero either way; the first real recordings did.
  */
 class SileroVad(
     private val session: OnnxModelSession,
@@ -21,17 +26,24 @@ class SileroVad(
     private companion object {
         const val STATE_LAYERS = 2
         const val STATE_SIZE = 128
+
+        /** Samples carried over from the previous frame, at 16 kHz. */
+        const val CONTEXT_SIZE = 64
     }
 
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
     private var state = FloatArray(STATE_LAYERS * STATE_SIZE)
+    private var context = FloatArray(CONTEXT_SIZE)
 
     override fun speechProbability(frame: FloatArray): Float {
         require(frame.size == frameSize) {
             "Silero at $SAMPLE_RATE_HZ Hz needs exactly $frameSize samples, got ${frame.size} — use Framer"
         }
 
-        val audioTensor = session.floatTensor(frame.copyOf(), longArrayOf(1, frameSize.toLong()))
+        val input = context + frame
+        context = frame.copyOfRange(frameSize - CONTEXT_SIZE, frameSize)
+
+        val audioTensor = session.floatTensor(input, longArrayOf(1, input.size.toLong()))
         val stateTensor = session.floatTensor(
             state.copyOf(),
             longArrayOf(STATE_LAYERS.toLong(), 1, STATE_SIZE.toLong()),
@@ -54,6 +66,7 @@ class SileroVad(
 
     override fun reset() {
         state = FloatArray(STATE_LAYERS * STATE_SIZE)
+        context = FloatArray(CONTEXT_SIZE)
     }
 
     override fun close() {

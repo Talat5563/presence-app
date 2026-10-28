@@ -9,7 +9,17 @@ confusing afternoon.
 
 ## Measured model behaviour
 
-**Silero VAD, on synthetic signals** (averaged over 10 frames each):
+> **Correction, 2026-10-28: the VAD adapter was broken until the first real recordings.** Silero v5
+> expects every 512-sample frame to be preceded by the previous frame's last 64 samples, as its
+> own wrapper does. `SileroVad` sent bare frames, and on real speech that drove the probability to
+> about 0.001: CHILDES audio produced **zero** speech segments, so no real voice could ever have
+> reached the embedder. With the context, the same 333 s of a child's speech gives a mean
+> probability of 0.64 and 106 segments. The synthetic table below was measured with the bug in
+> place. It still shows that synthetic audio cannot exercise the VAD, which is exactly why the
+> bug survived every test until real recordings arrived.
+
+**Silero VAD, on synthetic signals** (averaged over 10 frames each; measured without the context,
+see above):
 
 | Signal | P(speech) |
 |---|---|
