@@ -119,4 +119,5 @@ individually before shipping — see spec §10, open question 2.
 
 ## License
 
-Not yet chosen. Pick one before making this repository public.
+[Apache License 2.0](LICENSE). Model weights are not part of this repository and carry their own
+licences — see Attribution above.
