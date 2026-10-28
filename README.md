@@ -102,6 +102,25 @@ for the build.
 ./gradlew :harness:run --args="--help"          # evaluation CLI
 ```
 
+### A stand-in corpus from CHILDES
+
+Until there are recordings of our own, [CHILDES](https://talkbank.org/childes/) family recordings
+(real homes, with parents and siblings) can stand in. They need a free TalkBank account; unzip the
+transcripts into `data/childes/transcripts/` and put the media in `data/childes/media/`, mirroring
+the transcripts' layout. Then describe each household in a CSV whose columns are
+`household_id,transcripts,target`, for example `mac,MacWhinney/*.cha,Ross`, and convert:
+
+```bash
+./gradlew :harness:importChildes --args="--transcripts data/childes/transcripts --media data/childes/media --households data/childes/households.csv --out data/childes-corpus"
+./gradlew :harness:run --args="--manifest data/childes-corpus --models models --out reports/childes"
+```
+
+The importer sets each household's earliest sessions aside for enrollment. It turns every later
+stretch of the target child talking into an episode, cut to the 10 s latency budget, with a call
+event at its start. Everyone else's speech becomes negative material. These are toddlers on 1980s
+recordings, so treat the verdict as a rehearsal, not the Phase 2 number. CHILDES is CC BY-NC-SA:
+evaluate with it, never redistribute it, and never train a shipped model on it.
+
 Model files are never committed. `models/PROVENANCE.txt` records which ones a given result used —
 quote it whenever you report numbers.
 

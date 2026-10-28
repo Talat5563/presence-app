@@ -110,7 +110,7 @@ fun main(argv: Array<String>) {
     val warnings = mutableListOf<String>()
 
     val targetsWithoutEvents = recordings
-        .filter { it.role == RecordingRole.TARGET_CHILD }
+        .filter { it.role == RecordingRole.TARGET_CHILD && !it.contentType.isEnrollment }
         .map { it.path }
         .filterNot { path -> events.any { it.recordingPath == path } }
     if (targetsWithoutEvents.isNotEmpty()) {
@@ -326,15 +326,18 @@ private val KNOWN_FLAGS = setOf(
     "help", "manifest", "models", "out", "holdout", "evaluate", "threshold", "input-name", "output-name",
 )
 
-internal fun parseArgs(argv: Array<String>): Map<String, String> {
+internal fun parseArgs(argv: Array<String>): Map<String, String> = parseFlags(argv, KNOWN_FLAGS)
+
+/** Parses `--flag value` pairs, plus a bare `--help`, rejecting any flag not in [known]. */
+internal fun parseFlags(argv: Array<String>, known: Set<String>): Map<String, String> {
     val args = mutableMapOf<String, String>()
     var index = 0
     while (index < argv.size) {
         val token = argv[index]
         require(token.startsWith("--")) { "unexpected argument: $token" }
         val key = token.removePrefix("--")
-        require(key in KNOWN_FLAGS) {
-            "unknown flag --$key. Known flags: ${KNOWN_FLAGS.sorted().joinToString { "--$it" }}"
+        require(key in known) {
+            "unknown flag --$key. Known flags: ${known.sorted().joinToString { "--$it" }}"
         }
         if (key == "help") {
             args["help"] = "true"

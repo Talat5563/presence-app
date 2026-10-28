@@ -58,6 +58,18 @@ class EvaluationTest {
     }
 
     @Test
+    fun `speech an importer reserved for enrollment is enrollment material too`() {
+        val split = Evaluation.splitCorpus(
+            listOf(
+                recording("enrol.wav", RecordingRole.PARENT, ContentType.ENROLLMENT, "dad"),
+                recording("stranger.wav", RecordingRole.STRANGER, ContentType.ENROLLMENT, "kim"),
+            ),
+        )
+
+        assertEquals(listOf("enrol.wav"), split.enrollment.map { it.path })
+    }
+
+    @Test
     fun `target calling and spontaneous audio become positives`() {
         val split = Evaluation.splitCorpus(
             listOf(

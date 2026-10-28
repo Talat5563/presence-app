@@ -38,12 +38,13 @@ data class CorpusSplit(
 object Evaluation {
 
     /**
-     * Read passages enrol; the target's calling and spontaneous audio are positives; everything
-     * else is a negative. Enrollment material never appears in evaluation.
+     * Read passages and other enrollment material enrol; the target's calling and spontaneous
+     * audio are positives; everything else is a negative. Enrollment material never appears in
+     * evaluation.
      */
     fun splitCorpus(recordings: List<Recording>): CorpusSplit {
         val enrollment = recordings.filter {
-            it.role.isHouseholdMember && it.contentType == ContentType.READ
+            it.role.isHouseholdMember && it.contentType.isEnrollment
         }
         val remainder = recordings - enrollment.toSet()
         return CorpusSplit(

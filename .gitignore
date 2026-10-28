@@ -57,6 +57,20 @@ models/*.bin
 *.wav
 *.m4a
 *.aac
+*.mp3
+*.flac
+*.ogg
+*.opus
+*.mp4
+*.mov
+*.webm
+
+# --- Corpora and evaluation output ---
+# Third-party corpora (e.g. CHILDES, CC BY-NC-SA) may be used for evaluation but never
+# redistributed, and reports quote real recordings' paths and timings.
+data/
+corpora/
+reports/
 **/voice-profiles/
 **/enrollment-audio/
 !src/**/test/resources/fixtures/*.wav

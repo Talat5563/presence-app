@@ -33,7 +33,21 @@ enum class RecordingRole {
     }
 }
 
-enum class ContentType { SPONTANEOUS, READ, CALLING, ROOM_TONE }
+/**
+ * What a recording contains. [READ] and [ENROLLMENT] are both set aside for enrollment: [READ] is a
+ * read passage recorded for the purpose (spec §9.1), [ENROLLMENT] is speech of any style that an
+ * importer reserved for it, such as a CHILDES household's earliest sessions.
+ */
+enum class ContentType {
+    SPONTANEOUS,
+    READ,
+    CALLING,
+    ROOM_TONE,
+    ENROLLMENT,
+    ;
+
+    val isEnrollment: Boolean get() = this == READ || this == ENROLLMENT
+}
 
 /** One audio file plus the §9.1 metadata that makes it interpretable. */
 data class Recording(
