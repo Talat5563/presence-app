@@ -4,7 +4,8 @@ Usage: python -I training/prepare_samromur.py DATA_DIR [--fetch]
 
   --fetch        download metadata_train.tsv and the three train tars (6.6 GB) at REVISION,
                  check their SHA-256, and unpack them to DATA_DIR/wav/train/<speaker>/<id>.flac.
-                 Without it the script uses whatever is already in DATA_DIR.
+                 Without it the script uses whatever is already in DATA_DIR, and with no audio
+                 there writes the lists anyway; with it, any listed file missing is an error.
   --fetch-test   likewise for the test split (96 MB), and write DATA_DIR/test.scp. Only for
                  checking a scorer against the published baseline; never for selection.
 
@@ -55,7 +56,23 @@ HOLDOUT_UTTERANCES = (5, 100)
 SEED = 20261029
 
 
-def fetch(data_dir, downloads):
+def unpack(archive, root, split):
+    """Unpacks archive's speaker folders into root/split/.
+
+    Each archive has one top-level folder (train_part_01/ ... train_part_03/, test/), which is
+    replaced by the split's name, so every split lands at wav/<split>/<speaker>/<id>.flac.
+    """
+    root = root.resolve()
+    with tarfile.open(archive) as tar:
+        members = tar.getmembers()
+        for member in members:
+            member.name = Path(split, *Path(member.name).parts[1:]).as_posix()
+            if not (root / member.name).resolve().is_relative_to(root) or not (member.isfile() or member.isdir()):
+                sys.exit(f"{archive}: refusing unsafe member {member.name}")
+        tar.extractall(root, members=members)
+
+
+def fetch(data_dir, downloads, split):
     for path, sha256 in downloads.items():
         target = data_dir / Path(path).name
         if not target.exists():
@@ -69,12 +86,7 @@ def fetch(data_dir, downloads):
             sys.exit(f"{target}: SHA-256 {digest.hexdigest()} does not match the pinned {sha256}")
         if target.suffixes[-2:] == [".tar", ".gz"]:
             print(f"unpacking {target.name} ...", flush=True)
-            root = (data_dir / "wav").resolve()
-            with tarfile.open(target) as tar:
-                for member in tar.getmembers():
-                    if not (root / member.name).resolve().is_relative_to(root) or not (member.isfile() or member.isdir()):
-                        sys.exit(f"{target}: refusing unsafe member {member.name}")
-                tar.extractall(root)
+            unpack(target, data_dir / "wav", split)
 
 
 def age_band(age):
@@ -93,10 +105,11 @@ def summarise(name, rows):
 
 def main():
     data_dir = Path(sys.argv[1])
-    if "--fetch" in sys.argv[2:]:
-        fetch(data_dir, TRAIN_DOWNLOADS)
+    fetched = "--fetch" in sys.argv[2:]
+    if fetched:
+        fetch(data_dir, TRAIN_DOWNLOADS, "train")
     if "--fetch-test" in sys.argv[2:]:
-        fetch(data_dir, TEST_DOWNLOADS)
+        fetch(data_dir, TEST_DOWNLOADS, "test")
         with open(data_dir / "metadata_test.tsv", encoding="utf-8") as f, \
                 open(data_dir / "test.scp", "w", encoding="utf-8", newline="\n") as scp:
             for r in csv.DictReader(f, delimiter="\t"):
@@ -182,7 +195,7 @@ def main():
         writer.writerows(r for r in rows if r["speaker_id"] in holdout)
 
     listed = sum(len(by_speaker[s]) for s in train) + sum(len(by_speaker[s]) for s in holdout)
-    if len(missing) == listed:
+    if len(missing) == listed and not fetched:
         print(f"audio not present under {data_dir / 'wav' / 'train'}: lists written for the paths it will have")
     elif missing:
         sys.exit(f"{len(missing)} of {listed} listed files are missing, e.g. {missing[0]}")

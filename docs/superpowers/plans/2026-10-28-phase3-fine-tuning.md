@@ -170,6 +170,19 @@ Fine-tuning is only worth something relative to a number measured the same way.
 >
 > Running it needs a phone-verified Kaggle account. It also needs this branch on GitHub, since
 > the notebook clones it.
+>
+> **First runs, 2026-10-29: two failures, both fixed.**
+>
+> - **Missing packages.** The first run stopped at the import check: `import wespeaker` loads
+>   its CLI, which needs silero-vad, umap-learn and hdbscan.
+> - **Wrong file paths.** The second run trained for hours on nothing. The train tars unpack to
+>   `train_part_0N/<speaker>/`, not `train/<speaker>/` like the test tar. So every path in the
+>   lists was missing, and `prepare_samromur.py` only warned about it.
+>   - WeSpeaker's loader logs "Failed to read" for each unreadable file and carries on.
+>   - `prepare_samromur.py` now unpacks every part into `wav/train/`. With `--fetch`, any missing
+>     file is now an error.
+>   - The notebook now reads 200 training files with `torchaudio.load` before training. It also
+>     stops training at the first "Failed to read".
 
 - [ ] `conf/samromur_resnet34_ft.yaml`, derived from WeSpeaker's `resnet_lm.yaml` (which is itself
       a fine-tuning recipe):
