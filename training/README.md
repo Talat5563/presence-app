@@ -6,7 +6,66 @@ Nothing here is part of the Gradle build. All data lives under the gitignored `d
 results under `reports/`.
 
 Needs Python 3.10+ with numpy, and ffmpeg on the PATH. Run everything from the repository root
-with `python -I`.
+with `python -I`. `check_checkpoint.py` also needs the packages in `requirements.txt`, which
+belong in a virtual environment (`.venv/`, gitignored).
+
+## Starting checkpoint (Task 1)
+
+The checkpoint is WeSpeaker `voxceleb_resnet34_LM` from Hugging Face,
+`Wespeaker/wespeaker-voxceleb-resnet34-LM` at revision `f0c48c298fd835726c27956a5d617bad7115627e`
+(CC BY 4.0):
+
+| File | SHA-256 |
+|---|---|
+| `avg_model` (PyTorch state dict) | `9872b375f2c6a3851ca471cbbf59e06efd23a627d78bf5872e1f0269fd298449` |
+| `config.yaml` | `3cf7d3243464cd939083e29d2be65c2abcdd954c1a64559bad73b74ffdb0db3e` |
+
+```bash
+python -I training/check_checkpoint.py data/wespeaker/resnet34_LM/avg_model models/speaker_embedding.onnx
+```
+
+**It is the network the app ships.** After folding each BatchNorm into its convolution, as the
+exporter does, all 36 convolutions and the embedding layer match `models/speaker_embedding.onnx`.
+The largest relative difference is 1.7e-7, which is float32 rounding. The mean vector is zero.
+The ONNX file that WeSpeaker publishes beside the checkpoint has the same weights, and the same
+graph node for node. sherpa-onnx's copy only adds metadata. Its shape matches WeSpeaker's
+`export_onnx.py`, with `feats` and `embs` at opset 14. Identical weights in an identical graph
+give identical embeddings, so this replaces the cosine check on clips. The check reads weights
+only and runs no WeSpeaker code. WeSpeaker itself first runs on Kaggle.
+
+The checkpoint's `config.yaml` is already the large-margin fine-tuning recipe:
+
+- **Schedule:** learning rate 1e-4 decaying to 2.5e-5, margin 0.5, 5 epochs, 600-frame chunks.
+- **Speaker count:** the head has 17,982 classes, which is VoxCeleb2's 5,994 speakers × 3. Speed
+  perturbation counts each speed as a new speaker. Task 4's head grows the same way when speed
+  perturbation is on.
+
+## Training data (Task 2)
+
+```bash
+python -I training/prepare_samromur.py data/samromur --fetch    # 6.6 GB at a pinned revision, hashes checked
+python -I training/make_trials.py data/samromur holdout          # trials for model selection
+```
+
+The FLACs are already 16 kHz mono 16-bit, and WeSpeaker reads FLAC, so the lists point at them
+directly instead of writing 15 GB of WAV.
+
+| | Speakers (sessions) | Utterances | Hours |
+|---|---:|---:|---:|
+| Corpus train split | 2,517 | 134,394 | 127.4 |
+| **Training** (sessions with 2+ utterances, holdout removed) | 2,327 | 130,465 | 123.6 |
+| **Holdout** for selection: 19 per gender × age band (4–8, 9–11, 12–14, 15–17), 5–100 utterances each | 152 | 3,891 | 3.8 |
+
+- **Almost no young children.** Ages 4–5 are 11 sessions and 0.1 h in all. Ages 4–6 together are
+  under 1 h. Most of the audio is ages 9–13. Our target children are 1–5.
+- **Unbalanced per speaker.** The median is 18 utterances per session and the largest is 2,399.
+- **Gender** (sessions): 1,357 female, 1,097 male, 63 unknown or other. Speakers with unknown
+  gender or age stay in training but are never held out.
+- **Session IDs are not children.** Train and test share no session ID. Train and dev share one,
+  010363, as the dataset card says. Nothing in the metadata links two sessions of one child, and
+  linking them by voice would mean identifying speakers, which the terms forbid. So a repeat
+  child stays two classes, which is a known bias towards a pessimistic EER.
+- **Holdout trials:** 2,910 target pairs, plus 8,730 hard and 8,730 random non-target pairs.
 
 ## Samrómur Children benchmark
 

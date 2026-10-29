@@ -108,6 +108,12 @@ Fine-tuning is only worth something relative to a number measured the same way.
 
 ### Task 1: Prove the starting point is what ships today
 
+> **Done 2026-10-29.** The weights are the same. After BatchNorm folding, the checkpoint and the
+> shipped ONNX differ by at most 1.7e-7 relative (float32 rounding), and WeSpeaker's own ONNX has
+> the same graph node for node. Weights were compared instead of embeddings: it is a stronger
+> check, and it runs no WeSpeaker code on this machine. `training/check_checkpoint.py`, with
+> hashes in [training/README.md](../../../training/README.md).
+
 - [ ] Download the WeSpeaker `voxceleb_resnet34_LM` PyTorch checkpoint (`avg_model.pt` and
       `config.yaml`). Record its URL and SHA-256.
 - [ ] Export it to ONNX with WeSpeaker's `export_onnx.py` and embed a few real CHILDES clips with
@@ -116,6 +122,16 @@ Fine-tuning is only worth something relative to a number measured the same way.
       the right one before fine-tuning anything.
 
 ### Task 2: Prepare Samrómur Children
+
+> **Done 2026-10-29**, in `training/prepare_samromur.py`. Two departures from the steps below:
+>
+> - **No WAV files.** The FLACs are already 16 kHz mono 16-bit, and WeSpeaker reads FLAC.
+> - **The ~150-speaker holdout is made here, not in Task 4.** It has 152 speakers, 19 per gender
+>   and age band.
+>
+> Sessions cannot be linked without identifying speakers, so they stay a known bias. The counts
+> are in [training/README.md](../../../training/README.md). Ages 4–5 total 0.1 h, so Samrómur
+> barely covers our target ages.
 
 - [ ] `prepare_samromur.py`: load the dataset from Hugging Face at a pinned revision. Write
       16-bit, 16 kHz mono WAV per utterance, plus WeSpeaker's `wav.scp` and `utt2spk` for each split.

@@ -82,3 +82,4 @@ reports/
 # Design drop archives — contents are extracted and tracked alongside
 docs/design/*.zip
 __pycache__/
+.venv/
