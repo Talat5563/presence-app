@@ -2,7 +2,9 @@
 # Kaggle image's packages cannot drift underneath the run). torch 2.4.1 + CUDA 12.1 still runs on
 # the P100 (sm_60) as well as the T4, and keeps torchaudio's sox_effects, which WeSpeaker's speed
 # perturbation uses. WeSpeaker's training imports every frontend it ships, hence s3prl, whisper,
-# transformers and peft although this recipe uses none of them.
+# transformers and peft although this recipe uses none of them. Likewise `import wespeaker` loads
+# its CLI, which imports silero-vad and the diarization clusterer (umap-learn, hdbscan); the
+# scikit-learn and numba pins below are those packages' dependencies, held to this period.
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.4.1+cu121
 torchaudio==2.4.1+cu121
@@ -22,5 +24,12 @@ openai-whisper==20250625
 transformers==4.46.3
 peft==0.13.2
 accelerate==1.1.1
+silero-vad==5.1.2
+umap-learn==0.5.6
+hdbscan==0.8.40
+scikit-learn==1.5.2
+numba==0.60.0
+llvmlite==0.43.0
+pynndescent==0.5.13
 onnx==1.16.2
 onnxruntime==1.19.2
