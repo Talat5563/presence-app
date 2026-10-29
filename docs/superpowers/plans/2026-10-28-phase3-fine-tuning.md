@@ -171,7 +171,7 @@ Fine-tuning is only worth something relative to a number measured the same way.
 > Running it needs a phone-verified Kaggle account. It also needs this branch on GitHub, since
 > the notebook clones it.
 >
-> **First runs, 2026-10-29: two failures, both fixed.**
+> **First runs, 2026-10-29: three failures, all fixed.**
 >
 > - **Missing packages.** The first run stopped at the import check: `import wespeaker` loads
 >   its CLI, which needs silero-vad, umap-learn and hdbscan.
@@ -183,6 +183,14 @@ Fine-tuning is only worth something relative to a number measured the same way.
 >     file is now an error.
 >   - The notebook now reads 200 training files with `torchaudio.load` before training. It also
 >     stops training at the first "Failed to read".
+> - **An empty recording.** The third run passed every check and reproduced the baseline on
+>   Samrómur test (11.25% hard EER, against the app's 11.26%). It trained normally for 100
+>   batches; then the new guard stopped it at `008711-0115168`. The metadata gives that recording
+>   duration 0, and it is the only such recording in the corpus.
+>   - `prepare_samromur.py` now leaves out recordings with duration 0, and its format check
+>     rejects any file with no samples. The holdout is unchanged.
+>   - The notebook now reads every training file with `torchaudio.load`, not just 200, and lists
+>     all the ones it cannot read.
 
 - [ ] `conf/samromur_resnet34_ft.yaml`, derived from WeSpeaker's `resnet_lm.yaml` (which is itself
       a fine-tuning recipe):

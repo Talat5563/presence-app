@@ -53,11 +53,13 @@ directly instead of writing 15 GB of WAV.
 | | Speakers (sessions) | Utterances | Hours |
 |---|---:|---:|---:|
 | Corpus train split | 2,517 | 134,394 | 127.4 |
-| **Training** (sessions with 2+ utterances, holdout removed) | 2,327 | 130,465 | 123.6 |
+| **Training** (sessions with 2+ utterances, holdout and one empty file removed) | 2,327 | 130,464 | 123.6 |
 | **Holdout** for selection: 19 per gender × age band (4–8, 9–11, 12–14, 15–17), 5–100 utterances each | 152 | 3,891 | 3.8 |
 
 - **Almost no young children.** Ages 4–5 are 11 sessions and 0.1 h in all. Ages 4–6 together are
   under 1 h. Most of the audio is ages 9–13. Our target children are 1–5.
+- **One empty recording.** `008711-0115168` has duration 0 in the metadata and no samples in the
+  FLAC. torchaudio cannot load it, so it is left out of every list.
 - **Unbalanced per speaker.** The median is 18 utterances per session and the largest is 2,399.
 - **Gender** (sessions): 1,357 female, 1,097 male, 63 unknown or other. Speakers with unknown
   gender or age stay in training but are never held out.

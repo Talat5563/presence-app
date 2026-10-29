@@ -22,6 +22,7 @@ sessions of one child. Linking them by voice would mean identifying speakers, wh
 corpus's terms forbid, so a child who recorded twice stays two classes in training and can form
 a "non-target" trial with itself. That pessimises EER slightly; it is reported, not corrected.
 
+Recordings the metadata gives a duration of 0 are empty files and are left out of every list.
 Speakers with fewer than 2 utterances are dropped from training: AAM-softmax needs more than
 one example per class. HOLDOUT_SIZE speakers are held out from training for model selection,
 equally per gender and age band (Samrómur's own dev split is one speaker in two-thirds).
@@ -121,7 +122,10 @@ def main():
         path = data_dir / f"metadata_{split}.tsv"
         if path.exists():
             splits[split] = list(csv.DictReader(open(path, encoding="utf-8"), delimiter="\t"))
-    rows = splits["train"]
+    # The metadata gives a few recordings (one at REVISION, 008711-0115168) a duration of 0: the
+    # FLAC holds no samples, torchaudio cannot load it, and WeSpeaker would skip it with a warning.
+    empty = [r["audio_id"] for r in splits["train"] if float(r["duration"]) == 0]
+    rows = [r for r in splits["train"] if float(r["duration"]) > 0]
     speaker_info = {r["speaker_id"]: (r["gender"], r["age"]) for r in rows}
 
     print("== Counts")
@@ -184,10 +188,11 @@ def main():
                         missing.append(flac)
                     elif soundfile:
                         info = soundfile.info(str(flac))
-                        if (info.samplerate, info.channels) != (16000, 1):
-                            bad_format.append(f"{flac}: {info.samplerate} Hz, {info.channels} channels")
+                        if (info.samplerate, info.channels) != (16000, 1) or info.frames == 0:
+                            bad_format.append(f"{flac}: {info.samplerate} Hz, {info.channels} channels, "
+                                              f"{info.frames} samples")
         summarise(name, [r for s in speakers for r in by_speaker[s]])
-    print(f"dropped {len(dropped)} single-utterance speakers from training")
+    print(f"dropped {len(empty)} empty recordings {empty} and {len(dropped)} single-utterance speakers")
 
     with open(data_dir / "metadata_holdout.tsv", "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter="\t", lineterminator="\n")
@@ -202,9 +207,9 @@ def main():
     elif soundfile is None:
         print(f"all {listed} files present (install soundfile to check their format)")
     elif bad_format:
-        sys.exit(f"{len(bad_format)} files are not 16 kHz mono, e.g. {bad_format[0]}")
+        sys.exit(f"{len(bad_format)} files are not non-empty 16 kHz mono, e.g. {bad_format[0]}")
     else:
-        print(f"all {listed} files present, 16 kHz mono")
+        print(f"all {listed} files present, non-empty 16 kHz mono")
 
 
 if __name__ == "__main__":
