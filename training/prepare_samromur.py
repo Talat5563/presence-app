@@ -2,9 +2,11 @@
 
 Usage: python -I training/prepare_samromur.py DATA_DIR [--fetch]
 
-  --fetch   download metadata_train.tsv and the three train tars (6.6 GB) at REVISION, check
-            their SHA-256, and unpack them to DATA_DIR/wav/train/<speaker>/<audio_id>.flac.
-            Without it the script uses whatever is already in DATA_DIR.
+  --fetch        download metadata_train.tsv and the three train tars (6.6 GB) at REVISION,
+                 check their SHA-256, and unpack them to DATA_DIR/wav/train/<speaker>/<id>.flac.
+                 Without it the script uses whatever is already in DATA_DIR.
+  --fetch-test   likewise for the test split (96 MB), and write DATA_DIR/test.scp. Only for
+                 checking a scorer against the published baseline; never for selection.
 
 Writes:
   DATA_DIR/wespeaker/{train,holdout}/wav.scp and utt2spk   WeSpeaker's list format, absolute paths
@@ -34,11 +36,15 @@ from pathlib import Path
 
 REPO = "https://huggingface.co/datasets/language-and-voice-lab/samromur_children/resolve"
 REVISION = "6bb44ee982da842051e42e1bbe8f81c3ffd04daf"
-DOWNLOADS = {
+TRAIN_DOWNLOADS = {
     "corpus/files/metadata_train.tsv": "fb0462f85ab82adf2408dd1030e0cfde122e2219506c4d00e32c7cd220b986f5",
     "corpus/speech/train/train_part_01.tar.gz": "a34abbaa2bbe125bac1389673089f26ce8c4821c0e7e8042c1e360ce932e75cd",
     "corpus/speech/train/train_part_02.tar.gz": "4a1d3a45c6f58999ebf04ad2a41a63e95257bac47908c2a53d9abf769ef31916",
     "corpus/speech/train/train_part_03.tar.gz": "0776b4c4bf25e0e46eada3dd50623ec330e15a8f86d22f399acb7301cd52bdf7",
+}
+TEST_DOWNLOADS = {
+    "corpus/files/metadata_test.tsv": "f8e17de89bb6456151634576bf6858dce9bfef7120cff622db423297ff36a355",
+    "corpus/speech/test.tar.gz": "8c25ba87b02ed93834f140597c087f9457fee304b96eca39af2f49ab0b5350a5",
 }
 
 HOLDOUT_SIZE = 152  # 19 per stratum: 2 genders x 4 age bands
@@ -49,8 +55,8 @@ HOLDOUT_UTTERANCES = (5, 100)
 SEED = 20261029
 
 
-def fetch(data_dir):
-    for path, sha256 in DOWNLOADS.items():
+def fetch(data_dir, downloads):
+    for path, sha256 in downloads.items():
         target = data_dir / Path(path).name
         if not target.exists():
             print(f"downloading {path} ...", flush=True)
@@ -88,7 +94,14 @@ def summarise(name, rows):
 def main():
     data_dir = Path(sys.argv[1])
     if "--fetch" in sys.argv[2:]:
-        fetch(data_dir)
+        fetch(data_dir, TRAIN_DOWNLOADS)
+    if "--fetch-test" in sys.argv[2:]:
+        fetch(data_dir, TEST_DOWNLOADS)
+        with open(data_dir / "metadata_test.tsv", encoding="utf-8") as f, \
+                open(data_dir / "test.scp", "w", encoding="utf-8", newline="\n") as scp:
+            for r in csv.DictReader(f, delimiter="\t"):
+                flac = (data_dir / "wav" / "test" / r["speaker_id"] / f"{r['audio_id']}.flac").resolve()
+                scp.write(f"{r['audio_id']} {flac.as_posix()}\n")
 
     splits = {}
     for split in ("train", "dev", "test"):

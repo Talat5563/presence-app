@@ -155,6 +155,22 @@ Fine-tuning is only worth something relative to a number measured the same way.
 
 ### Task 4: Fine-tune on Kaggle
 
+> **Written 2026-10-29, not yet run.** `training/kaggle_finetune.ipynb` and
+> `training/conf/samromur_resnet34_ft.yaml` are ready. Two changes from the steps below:
+>
+> - **Recipe.** WeSpeaker's checkpoint loading is not the problem: `model_init` loads before the
+>   head exists, so the head starts fresh by construction, and the notebook checks every backbone
+>   tensor arrives. The problem is the training settings. A fresh head under the large-margin
+>   recipe (learning rate 1e-4, margin 0.5 from step one) has little to learn from. Chosen with
+>   the user: WeSpeaker's CN-Celeb fine-tuning recipe instead, scaled to 15 epochs. That is
+>   learning rate 5e-3 decaying to 2.5e-5 with warm-up, margin 0 rising to 0.2, and speed
+>   perturbation on.
+> - **No ONNX export per epoch.** Each epoch is scored on the holdout on the GPU in PyTorch, and
+>   only the pick is exported. The export is then checked against PyTorch.
+>
+> Running it needs a phone-verified Kaggle account. It also needs this branch on GitHub, since
+> the notebook clones it.
+
 - [ ] `conf/samromur_resnet34_ft.yaml`, derived from WeSpeaker's `resnet_lm.yaml` (which is itself
       a fine-tuning recipe):
   - `model_init` points at the Task 1 checkpoint.
@@ -178,6 +194,11 @@ Fine-tuning is only worth something relative to a number measured the same way.
       wall-clock time and final dev EER.
 
 ### Task 5: Verify the exported model in our pipeline
+
+> **Front-end parity is already shown for these features (2026-10-29).** WeSpeaker's inference
+> front end in Python (`training/embed_onnx.py`) and the Kotlin harness give identical embeddings
+> on all 1,714 Samrómur test files with the shipped model (cosine 1.000000). What remains is to
+> run the same check, and the integration test, on the fine-tuned file.
 
 - [ ] Check the signature: input `feats [B, T, 80]`, output `embs [B, 256]`. Run the existing
       `:shared:integrationTest` with the new file in place of `models/speaker_embedding.onnx`;

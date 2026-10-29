@@ -1,0 +1,26 @@
+# The Kaggle fine-tuning environment (kaggle_finetune.ipynb installs it into its own venv, so the
+# Kaggle image's packages cannot drift underneath the run). torch 2.4.1 + CUDA 12.1 still runs on
+# the P100 (sm_60) as well as the T4, and keeps torchaudio's sox_effects, which WeSpeaker's speed
+# perturbation uses. WeSpeaker's training imports every frontend it ships, hence s3prl, whisper,
+# transformers and peft although this recipe uses none of them.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1+cu121
+torchaudio==2.4.1+cu121
+numpy==1.26.4
+scipy==1.13.1
+pyyaml==6.0.2
+fire==0.4.0
+tableprint==0.9.1
+kaldiio==2.17.2
+lmdb==1.5.1
+torchnet==0.0.4
+soundfile==0.12.1
+tqdm==4.66.5
+setuptools==80.9.0
+s3prl==0.4.17
+openai-whisper==20250625
+transformers==4.46.3
+peft==0.13.2
+accelerate==1.1.1
+onnx==1.16.2
+onnxruntime==1.19.2

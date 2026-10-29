@@ -1,0 +1,101 @@
+### Fine-tuning WeSpeaker voxceleb_resnet34_LM on Samrómur Children (Phase 3, Task 4)
+#
+# Derived from WeSpeaker's examples/cnceleb/v3_finetune/conf/ecapa_tdnn_ft.yaml, its recipe for
+# moving a trained model to a new corpus, at commit 9fecd6cb. The speaker-classification head
+# starts fresh (2,327 Samrómur speakers replace VoxCeleb's), so the recipe warms the learning
+# rate up from zero and ramps the margin up from zero rather than starting at the large-margin
+# values the checkpoint was last trained with. Changes from that recipe:
+#
+#   model           ResNet34 with the checkpoint's own model_args (256-d TSTP), not ECAPA-TDNN
+#   num_epochs      15, not 50: it starts from a supervised model, not a self-supervised one,
+#                   and the holdout EER after every epoch picks the checkpoint
+#   margin_update   the ramp is scaled to 15 epochs: 0 through the warm-up, rising over
+#                   epochs 3-5, fixed at 0.2 from epoch 6
+#   aug_prob        0: no MUSAN or RIR data in the first run (WeSpeaker skips augmentation
+#                   without them anyway; 0 says so)
+#   num_workers     4, Kaggle's CPU count; the notebook divides it between GPUs
+#
+# exp_dir, gpus and model_init are passed by kaggle_finetune.ipynb on the command line.
+#
+# The learning rate is scaled by (GPUs x batch size / 64), WeSpeaker's linear rule: the peak is
+# 1e-2 on one GPU, 2e-2 on Kaggle's T4 x2, as in the CN-Celeb recipe's two GPUs.
+
+exp_dir: exp/samromur-resnet34-ft
+gpus: "[0]"
+num_avg: 3
+enable_amp: False
+
+seed: 42
+num_epochs: 15
+save_epoch_interval: 1
+log_batch_interval: 100
+
+dataloader_args:
+  batch_size: 128
+  num_workers: 4
+  pin_memory: False
+  prefetch_factor: 8
+  drop_last: True
+
+dataset_args:
+  sample_num_per_epoch: 0
+  shuffle: True
+  shuffle_args:
+    shuffle_size: 2500
+  filter: True
+  filter_args:
+    min_num_frames: 100
+    max_num_frames: 800
+  resample_rate: 16000
+  speed_perturb: True
+  num_frms: 200
+  aug_prob: 0.0
+  fbank_args:
+    num_mel_bins: 80
+    frame_shift: 10
+    frame_length: 25
+    dither: 1.0
+  spec_aug: False
+  spec_aug_args:
+    num_t_mask: 1
+    num_f_mask: 1
+    max_t: 10
+    max_f: 8
+    prob: 0.6
+
+model: ResNet34
+model_init: null
+model_args:
+  feat_dim: 80
+  embed_dim: 256
+  pooling_func: "TSTP"
+  two_emb_layer: False
+projection_args:
+  project_type: "arc_margin"
+  scale: 32.0
+  easy_margin: False
+
+margin_scheduler: MarginScheduler
+margin_update:
+  initial_margin: 0.0
+  final_margin: 0.2
+  increase_start_epoch: 3
+  fix_start_epoch: 6
+  update_margin: True
+  increase_type: "exp"
+
+loss: CrossEntropyLoss
+loss_args: {}
+
+optimizer: SGD
+optimizer_args:
+  momentum: 0.9
+  nesterov: True
+  weight_decay: 0.0001
+
+scheduler: ExponentialDecrease
+scheduler_args:
+  initial_lr: 5.0e-3
+  final_lr: 2.5e-5
+  warm_up_epoch: 2
+  warm_from_zero: True

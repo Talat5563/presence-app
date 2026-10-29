@@ -17,23 +17,31 @@ import numpy as np
 
 P_TARGET = 0.01
 
-embeddings = {}
-with open(sys.argv[1], encoding="utf-8") as f:
-    reader = csv.reader(f)
-    next(reader)
-    for row in reader:
-        embeddings[Path(row[0]).stem] = np.array(row[1:], dtype=np.float64)
 
-scores = {"target": [], "hard": [], "random": []}
-missing = 0
-for line in open(sys.argv[2], encoding="utf-8"):
-    a, b, label, kind = line.split()
-    if a not in embeddings or b not in embeddings:
-        missing += 1
-        continue
-    ea, eb = embeddings[a], embeddings[b]
-    score = float(ea @ eb / (np.linalg.norm(ea) * np.linalg.norm(eb)))
-    scores["target" if label == "target" else kind].append(score)
+def load_embeddings(path):
+    """Embeddings CSV (embedFiles or embed_onnx.py layout), keyed by file stem."""
+    embeddings = {}
+    with open(path, encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            embeddings[Path(row[0]).stem] = np.array(row[1:], dtype=np.float64)
+    return embeddings
+
+
+def trial_scores(embeddings, trials_path):
+    """Cosine scores by kind ("target", "hard", "random"), and how many trials lacked an embedding."""
+    scores = {"target": [], "hard": [], "random": []}
+    missing = 0
+    for line in open(trials_path, encoding="utf-8"):
+        a, b, label, kind = line.split()
+        if a not in embeddings or b not in embeddings:
+            missing += 1
+            continue
+        ea, eb = embeddings[a], embeddings[b]
+        score = float(ea @ eb / (np.linalg.norm(ea) * np.linalg.norm(eb)))
+        scores["target" if label == "target" else kind].append(score)
+    return {kind: np.array(values) for kind, values in scores.items()}, missing
 
 
 def error_rates(targets, nontargets):
@@ -58,11 +66,17 @@ def min_dcf(targets, nontargets):
     return float(dcf.min() / min(P_TARGET, 1 - P_TARGET))
 
 
-t = np.array(scores["target"])
-print(f"{len(t)} target trials" + (f" ({missing} trials skipped: utterance not embedded)" if missing else ""))
-for kind in ("hard", "random"):
-    n = np.array(scores[kind])
-    if len(n) == 0:
-        continue
-    print(f"  {kind:6} non-targets ({len(n):5d}): EER {eer(t, n):6.2%}   minDCF(0.01) {min_dcf(t, n):.3f}   "
-          f"mean cosine target {t.mean():.3f} / non-target {n.mean():.3f}")
+def main():
+    scores, missing = trial_scores(load_embeddings(sys.argv[1]), sys.argv[2])
+    t = scores["target"]
+    print(f"{len(t)} target trials" + (f" ({missing} trials skipped: utterance not embedded)" if missing else ""))
+    for kind in ("hard", "random"):
+        n = scores[kind]
+        if len(n) == 0:
+            continue
+        print(f"  {kind:6} non-targets ({len(n):5d}): EER {eer(t, n):6.2%}   minDCF(0.01) {min_dcf(t, n):.3f}   "
+              f"mean cosine target {t.mean():.3f} / non-target {n.mean():.3f}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,9 @@
-# Local tools in training/ (check_checkpoint.py, prepare_samromur.py's format check).
+# Local tools in training/: check_checkpoint.py, embed_onnx.py, compare_embeddings.py and
+# prepare_samromur.py's format check. The Kaggle run pins its own: requirements-kaggle.txt.
 # CPU wheels: pip install -r training/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.4.1
+torchaudio==2.4.1
 onnx==1.16.2
+onnxruntime==1.19.2
 numpy==1.26.4
 soundfile==0.12.1

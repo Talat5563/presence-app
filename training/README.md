@@ -67,6 +67,54 @@ directly instead of writing 15 GB of WAV.
   child stays two classes, which is a known bias towards a pessimistic EER.
 - **Holdout trials:** 2,910 target pairs, plus 8,730 hard and 8,730 random non-target pairs.
 
+## Fine-tuning on Kaggle (Task 4)
+
+`kaggle_finetune.ipynb` runs the whole job on a Kaggle GPU. Its first cell says how to import and
+commit it. In outline:
+
+1. **Environment.** Clones this repository and WeSpeaker at pinned commits. Builds a Python 3.11
+   venv from `requirements-kaggle.txt` with uv.
+2. **Data.** Fetches the checkpoint and Samrómur and checks their hashes.
+3. **Checks.** Confirms that `model_init` loads every backbone tensor, and that the GPU scorer
+   reproduces the app's 11.26% on Samrómur test.
+4. **Training.** Trains on `conf/samromur_resnet34_ft.yaml`.
+5. **Selection.** Scores every epoch, and the average of the last three, on the 152-speaker
+   holdout. Picks the lowest hard EER.
+6. **Export.** Exports the pick to ONNX and verifies the tensor contract, plus parity with PyTorch.
+
+Training stops itself at a time budget, and a second commit with `RESUME_FROM` continues from the
+last epoch. A resumed run restarts SGD's momentum, which WeSpeaker does not checkpoint.
+
+**The recipe** is WeSpeaker's own for moving a trained model to a new corpus
+(`examples/cnceleb/v3_finetune`), not the large-margin settings the checkpoint was last trained
+with. The new head starts from random weights, and a learning rate of 1e-4 with margin 0.5 from
+the first step gives it little chance to learn. So the run uses:
+
+- learning rate 5e-3 decaying to 2.5e-5 after a 2-epoch warm-up from zero;
+- margin 0 rising to 0.2 over epochs 3–5;
+- speed perturbation, so 3 × 2,327 classes;
+- 2 s chunks and 15 epochs.
+
+The config's header lists every difference from WeSpeaker's file.
+
+**Pinned environment.** WeSpeaker's training imports every frontend it ships, so s3prl, whisper,
+transformers and peft must install even though this recipe uses none of them. Two of their
+source packages (whisper, and visdom through torchnet) need setuptools older than 81, hence
+`build-constraints-kaggle.txt`. The full set resolves under uv on Python 3.11. That is checked
+here with CPU wheels; the CUDA build has not run yet.
+
+**The app's front end is WeSpeaker's.** `embed_onnx.py` computes WeSpeaker's inference features
+in Python: Kaldi fbank, Hamming window, int16 scale, no dither, mean normalization. On all 1,714
+Samrómur test files, with the shipped model, its embeddings match the Kotlin harness's at cosine
+1.000000. Both give 11.26% EER. FLAC and the converted WAV give identical embeddings. So
+selecting on Python-side embeddings selects for what the app will compute, and the parity half of
+Task 5 holds for any model trained on these features.
+
+```bash
+python -I training/embed_onnx.py models/speaker_embedding.onnx data/samromur/test.list reports/samromur-baseline/test-embeddings-python.csv
+python -I training/compare_embeddings.py reports/samromur-baseline/test-embeddings.csv reports/samromur-baseline/test-embeddings-python.csv
+```
+
 ## Samrómur Children benchmark
 
 Samrómur Children is CC BY 4.0. Its one condition: do not attempt to identify any speaker.
