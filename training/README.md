@@ -154,7 +154,7 @@ alarms per hour.
 
 | Corpus | Ages | Episodes scored | Best detection | FA/h there | AUC child vs parents | AUC child vs sibling |
 |---|---|---:|---:|---:|---:|---:|
-| MacWhinney, Ross 4;00–4;05 | 4 | 367 | 5.7% | 1.1 | 0.57 | 0.53 |
+| MacWhinney, Ross 4;00–4;05 | 4 | 367 | 5.2% | 1.1 | 0.57 | 0.53 |
 | MacWhinney, Ross 4;00–6;11 | 4–6 | 1,997 | 2.9% | 7.8 | — | — |
 | Gleason, 22 families | 2–5 | 557 (7 families skipped) | 8.1% | 0.35 | 0.89 | — |
 | BermanLong (Hebrew), 4 children | 1–3 | 1,524 | 7.0% | 6.8 | 0.78 | 0.51 against other children |
@@ -176,6 +176,19 @@ Every row is FALL_BACK. The rows fail for different reasons:
   yield exactly one, which cannot reach the default threshold.
 - **Samrómur** (clean read speech, ages 6–16) is far easier than either. Gains there will
   overstate gains in a home.
+
+## Fine-tuned model (Phase 3, Task 6)
+
+Full results: [2026-10-30-phase3-results.md](../docs/superpowers/plans/2026-10-30-phase3-results.md).
+Samrómur test EER falls from 11.26% to 4.23% (hard) and from 9.05% to 3.97% (random). minDCF
+barely moves, 0.876 → 0.847. Every CHILDES row is still FALL_BACK. Child against sibling stays at
+chance, and Gleason's child against parent drops from 0.89 to 0.80. The model is not shipped.
+
+Before/after AUCs from two `--embeddings` dumps of the same manifest:
+
+```bash
+python -I tools/experiments/household_auc.py reports/phase3-base/childes-gleason/embeddings.csv reports/phase3-ft/childes-gleason/embeddings.csv
+```
 
 ## VAD and gate calibration (CHILDES)
 

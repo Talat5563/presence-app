@@ -98,7 +98,7 @@ Fine-tuning is only worth something relative to a number measured the same way.
 - [ ] Record the CHILDES harness baselines with `--embeddings`, so later models can be compared
       offline:
   - MacWhinney slice (Ross 4;00–4;05): already measured. AUC 0.566 against everyone, 0.533
-    against his brother; best point 5.7% detection at 1.1 FA/h.
+    against his brother; best point 5.2% detection at 1.1 FA/h.
   - Full MacWhinney: already measured, FALL_BACK.
   - **Gleason** (22 families, mostly without siblings): media complete, so import and measure it.
     This is the child-versus-parent case.
@@ -229,7 +229,15 @@ Fine-tuning is only worth something relative to a number measured the same way.
       features. Per-clip cosine must be at least 0.999. Anything lower means the model is being fed
       different features than it was trained on, and every number downstream would be wrong.
 
+> **Done 2026-10-30.** The integration test passes 17 of 17 with the fine-tuned file. Kotlin and
+> Python agree at cosine 1.000000 on all 1,489 Samrómur dev files.
+
 ### Task 6: Measure
+
+> **Done 2026-10-30. Results: [2026-10-30-phase3-results.md](2026-10-30-phase3-results.md).**
+> Samrómur EER more than halves (test 11.26% → 4.23%), but every CHILDES run is still FALL_BACK,
+> in English and in Hebrew. Child against sibling stays at chance, and Gleason's child against
+> parent gets worse. This is the second outcome below, so Task 7 is on hold.
 
 - [ ] Samrómur dev and test: EER and minDCF, fine-tuned against baseline. Test once only.
 - [ ] Re-run the CHILDES harness with the new model on the same manifests as Task 0: MacWhinney
