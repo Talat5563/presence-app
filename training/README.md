@@ -184,6 +184,11 @@ Samrómur test EER falls from 11.26% to 4.23% (hard) and from 9.05% to 3.97% (ra
 barely moves, 0.876 → 0.847. Every CHILDES row is still FALL_BACK. Child against sibling stays at
 chance, and Gleason's child against parent drops from 0.89 to 0.80. The model is not shipped.
 
+A sweep of early epochs and of weight blends with the shipped model
+(`training/export_candidate.py`) found one candidate, 25% fine-tuned. It stays within noise of the
+shipped model on CHILDES, and on Samrómur dev it improves EER (8.97% → 6.05%) and minDCF
+(0.666 → 0.422). It changes no verdict.
+
 Before/after AUCs from two `--embeddings` dumps of the same manifest:
 
 ```bash

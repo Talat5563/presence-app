@@ -3,6 +3,7 @@
 Usage:
     ./gradlew :harness:run --args="... --embeddings reports/x/embeddings.csv"
     python -I tools/experiments/household_auc.py reports/x/embeddings.csv [reports/y/embeddings.csv ...]
+    python -I tools/experiments/household_auc.py --households h1,h2 ...   # score only these households
 
 For each household with an enrolled target child, every observation is scored as
 HouseholdMatcher does (centroid per enrolled speaker, the raw log-odds before any gate), and the
@@ -28,7 +29,7 @@ def auc(pos, neg):
     return float((lo + 0.5 * (hi - lo)).sum() / (len(pos) * len(neg)))
 
 
-def scores(path):
+def scores(path, households=None):
     enroll, obs = defaultdict(list), []
     target = {}
     with open(path, encoding="utf-8") as f:
@@ -36,6 +37,8 @@ def scores(path):
         next(reader)
         for row in reader:
             kind, _, hh, spk, role = row[:5]
+            if households is not None and hh not in households:
+                continue
             vec = np.array(row[7:], dtype=np.float64)
             if kind == "enroll":
                 enroll[(hh, spk)].append(vec)
@@ -62,7 +65,10 @@ def scores(path):
 
 
 def main():
-    results = [(p, *scores(p)) for p in sys.argv[1:]]
+    args, households = sys.argv[1:], None
+    if args[:1] == ["--households"]:
+        households, args = set(args[1].split(",")), args[2:]
+    results = [(p, *scores(p, households)) for p in args]
     roles = sorted({r for _, by_role, _ in results for r in by_role if r != "target_child"})
     print("| Embeddings | Child obs | Child closest to own centroid | "
           + " | ".join(f"AUC vs {r}" for r in roles) + " | AUC vs all others |")

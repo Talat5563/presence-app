@@ -109,12 +109,85 @@ or made things worse. The differences that matter:
 CHILDES cannot say which of these matters. It also cannot say how a modern phone in the family's
 home would behave. Our own recordings (Phase 1) can.
 
+## Checkpoint sweep (2026-11-19)
+
+Option 1 below, run locally on this run's checkpoints. Six candidates:
+
+- **Early epochs:** epochs 1, 2 and 3, which had less time to specialise.
+- **Blends** (WiSE-FT): `(1 − α) · shipped + α · epoch 7` for α = 0.25, 0.5 and 0.75, tensor by
+  tensor.
+
+`training/export_candidate.py` builds each one with WeSpeaker's own exporter. At α = 1 it
+reproduces the epoch 7 file exactly. At α = 0 it matches the shipped file at cosine 0.999996.
+
+**The rule, fixed before any candidate ran:**
+
+- **The split:** take the 15 Gleason families with an enrolled child in alphabetical order and
+  alternate them. The *select* half has 8 families and 149 child observations; the *report*
+  half has 7 families and 180.
+- **The bar:** a candidate qualifies if its select-half AUC (child against everyone) is within
+  0.01 of the shipped model's 0.9243.
+- **The choice:** among qualifiers, the lowest Samrómur holdout EER wins.
+
+The holdout could not be scored here, because the training audio was only ever on Kaggle.
+Samrómur dev stands in for it. Test was not used again.
+
+| Candidate | Gleason select AUC | Gleason report AUC | Gleason, threshold 2 | Samrómur dev EER hard | dev minDCF |
+|---|---:|---:|---|---:|---:|
+| shipped | 0.924 | 0.853 | 8.1% / 0.35 FA/h | 8.97% | 0.666 |
+| epoch 1 | 0.831 | 0.851 | 7.9% / 1.64 | — | — |
+| epoch 2 | 0.820 | 0.855 | 7.5% / 2.23 | — | — |
+| epoch 3 | 0.769 | 0.794 | 6.8% / 3.16 | — | — |
+| **blend α = 0.25** | **0.914** | 0.842 | **10.1% / 0.47** | 6.05% | **0.422** |
+| blend α = 0.5 | 0.885 | 0.847 | 9.5% / 2.70 | 4.00% | 0.363 |
+| blend α = 0.75 | 0.839 | 0.824 | 8.4% / 4.57 | 3.36% | 0.368 |
+| epoch 7 (fine-tuned) | 0.793 | 0.789 | 6.5% / 4.57 | 4.22% | 0.482 |
+
+(Epochs 1–3 on the training holdout, scored on Kaggle: 8.90%, 8.04% and 7.11% hard EER.)
+
+- **Strictly, nothing qualifies.** The α = 0.25 blend scores 0.91406 against a bar of 0.91431. It
+  is carried forward as the best candidate, not as a pass.
+- **Every candidate loses select-half AUC against the shipped model,** and among the blends it
+  falls steadily as α grows.
+- **The halves disagree by several hundredths.** Epochs 1 and 2 lose about 0.1 on the select half
+  but match the shipped model on the report half (0.851 and 0.855 against 0.853). With 7–8
+  families per half, gaps of that size are noise, so the bar was tighter than the data can
+  resolve.
+- **Blending beats fine-tuning on Samrómur too.** Every blend has a lower minDCF on dev than
+  epoch 7, and α = 0.5 and 0.75 have lower EERs as well. So epoch 7 had overfit its own training
+  set. Dev is lopsided (one speaker holds 1,000 of its 1,489 utterances), so treat this as a
+  hint, not a result.
+
+The α = 0.25 blend on the other corpora, shipped → blend (fine-tuned in brackets):
+
+| Corpus | AUC vs sibling | AUC vs parent | AUC vs all others | Threshold 2 | Best at ≤ 2 FA/h |
+|---|---:|---:|---:|---|---|
+| MacWhinney slice (EN) | 0.533 → 0.518 (0.498) | 0.568 → 0.581 | 0.566 → 0.577 | 5.2% / 1.14 → 7.1% / 1.31 | 5.2% → 7.1% |
+| BermanLong (HE) | — | 0.781 → 0.774 | 0.718 → 0.723 | 7.0% / 6.8 → 6.6% / 6.7 | 0.9% → 0.8% |
+
+**What the sweep says.** The α = 0.25 blend roughly keeps the shipped model's behaviour on all
+three CHILDES corpora, within noise. It also keeps a real share of the Samrómur gain: dev EER
+falls from 8.97% to 6.05%, and minDCF falls from 0.666 to 0.422, better than the fine-tuned
+model's. It is the first candidate that is no worse on CHILDES and better on Samrómur.
+
+It does not change the verdict. Every run is still FALL_BACK, and Ross against his brother is
+still at chance. **Its value depends on whether the real target is closer to Samrómur
+(school-age) or to CHILDES (toddlers).** Only Phase 1 recordings can say. Nothing is shipped.
+
+Reproducing one candidate:
+
+```bash
+python -I training/export_candidate.py --wespeaker data/wespeaker/src --config data/kaggle-runs/2026-10-30/out/exp/config.yaml \
+  --base data/wespeaker/resnet34_LM/avg_model --tuned data/kaggle-runs/2026-10-30/out/exp/models/model_7.pt \
+  --alpha 0.25 --out data/models-sweep/b25/speaker_embedding.onnx
+python -I tools/experiments/household_auc.py --households gleason-bobby,gleason-eddie,gleason-guy,gleason-isadora,gleason-laurel,gleason-olivia,gleason-susan,gleason-william \
+  reports/phase3-base/childes-gleason/embeddings.csv reports/phase3-sweep/b25/childes-gleason/embeddings.csv
+```
+
 ## Options from here (not yet decided)
 
-1. **Choose a less specialised model from this run.** All 15 epoch checkpoints are kept locally.
-   An early epoch, or a weight blend of the shipped and fine-tuned models, may keep the shipped
-   model's robustness. To choose without testing on the same data, select on some Gleason
-   families and report on the rest. Runs locally; about 25 minutes per candidate.
+1. **Choose a less specialised model from this run.** Done above. The α = 0.25 blend is no worse
+   on CHILDES and better on Samrómur, but it does not change any verdict.
 2. **Retrain with noise and reverberation augmentation.** This is the plan's prescribed next step.
    It needs one more Kaggle run, and a licence check on the noise and room-response data before
    any of it trains a shipped model.
