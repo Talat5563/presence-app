@@ -184,10 +184,62 @@ python -I tools/experiments/household_auc.py --households gleason-bobby,gleason-
   reports/phase3-base/childes-gleason/embeddings.csv reports/phase3-sweep/b25/childes-gleason/embeddings.csv
 ```
 
+## School-age check (2026-11-20)
+
+The target child is school-age (6 or older). Two checks restrict the evidence to that case.
+
+**Samrómur dev by age.** Every dev speaker is 9–15. A trial counts only when both speakers are in
+the band:
+
+| Model | Ages | Target / non-target trials | EER | minDCF |
+|---|---|---|---:|---:|
+| shipped | 9–12 | 346 / 2,199 | 9.24% | 0.730 |
+| α = 0.25 blend | 9–12 | 346 / 2,199 | 5.78% | 0.482 |
+| fine-tuned (epoch 7) | 9–12 | 346 / 2,199 | 4.63% | 0.738 |
+| shipped | 13–15 | 100 / 66 | 7.79% | 0.190 |
+| α = 0.25 blend | 13–15 | 100 / 66 | 4.77% | 0.100 |
+| fine-tuned (epoch 7) | 13–15 | 100 / 66 | 3.02% | 0.040 |
+
+The blend's gain holds in the 9–12 band, which is closest to the target, and its minDCF there is
+better than the fine-tuned model's. The 13–15 band has only 66 non-target trials, so it is
+not read.
+
+**CHILDES at age 6.** Gleason's children are 2–5 and BermanLong's are 1–3. The only school-age
+child we have is Ross (MacWhinney) at 6;0–6;11, 72 sessions. These were imported as their own
+corpus, `data/childes-mac6`, so that enrollment comes from his earliest age-6 sessions rather than
+from age 4:
+
+| Model | AUC vs sibling | AUC vs parent | AUC vs all others | Threshold 2 | Verdict |
+|---|---:|---:|---:|---|---|
+| shipped | 0.667 | 0.799 | 0.739 | 3.1% / 0.09 FA/h | FALL_BACK |
+| α = 0.25 blend | 0.669 | 0.796 | 0.738 | 4.9% / 0.13 FA/h | FALL_BACK |
+
+The two models are tied. Separation from his brother Mark is better than at age 4 (0.67 against
+0.52), but the same-age enrollment and the boys being older both changed at once, so this does
+not say which mattered. The harness sweeps thresholds 2–20 only, and detection is far below the
+50% that ITERATE needs at every one of them.
+
+**What it means.** For a school-age target, the blend is as good as the shipped model on the one
+real home recording we have, and clearly better on read speech from 9–12-year-olds. That makes
+it the better candidate for school-age children. It still does not pass any verdict, and the
+CHILDES evidence is one boy recorded in the 1980s. Phase 1 recordings remain the deciding
+evidence. Nothing is shipped.
+
+```bash
+printf 'household_id,transcripts,target\nmac-ross,MacWhinney/06*.cha,CHI\n' > data/childes/households-mac6.csv
+./gradlew :harness:importChildes --args="--transcripts data/childes/transcripts --media data/childes/media \
+  --households data/childes/households-mac6.csv --out data/childes-mac6 --cache data/childes-corpus-mac/cache"
+./gradlew :harness:vadProbes --args="--manifest data/childes-mac6 --models data/models-base --out reports/vad-probes/mac6"
+./gradlew :harness:run --args="--manifest data/childes-mac6 --models data/models-sweep/b25 --out reports/phase3-sweep/mac6-b25 \
+  --embeddings reports/phase3-sweep/mac6-b25/embeddings.csv --vad-probes reports/vad-probes/mac6"
+python -I tools/experiments/samromur_by_age.py dev reports/samromur-baseline/dev-embeddings.csv reports/phase3-sweep/b25/dev-embeddings.csv
+```
+
 ## Options from here (not yet decided)
 
 1. **Choose a less specialised model from this run.** Done above. The α = 0.25 blend is no worse
-   on CHILDES and better on Samrómur, but it does not change any verdict.
+   on CHILDES and better on Samrómur, but it does not change any verdict. The school-age check
+   supports it as the candidate for a school-age child.
 2. **Retrain with noise and reverberation augmentation.** This is the plan's prescribed next step.
    It needs one more Kaggle run, and a licence check on the noise and room-response data before
    any of it trains a shipped model.
